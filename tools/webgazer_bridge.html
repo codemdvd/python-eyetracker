@@ -1,0 +1,85 @@
+<!-- tools/webgazer_bridge.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebGazer bridge</title>
+  <script src="webgazer.js"></script>
+</head>
+<body>
+  <h1>WebGazer bridge</h1>
+  <p id="status">Connecting...</p>
+
+  <script>
+    // достаём параметры из URL
+    const params = new URLSearchParams(window.location.search);
+    const trackerId = params.get("tracker_id") || "webgazer";
+    const wsPort = params.get("ws_port") || "8000";
+    const sessionId = params.get("session_id") || "";
+
+    // создаём WS к Python
+    const ws = new WebSocket(`ws://localhost:${wsPort}/ws/${trackerId}`);
+
+    ws.onopen = () => {
+      document.getElementById("status").textContent = "WS connected";
+      console.log("[bridge] WS connected");
+    };
+
+    ws.onclose = () => {
+      document.getElementById("status").textContent = "WS closed";
+      console.log("[bridge] WS closed");
+    };
+
+    ws.onerror = (e) => {
+      console.log("[bridge] WS error", e);
+    };
+
+    // СЮДА ПРИЛЕТАЮТ СОБЫТИЯ ОТ ORCHESTRATOR (calib_point_start, ...)
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        console.log("[bridge] incoming event:", msg);
+
+        if (msg.type === "calib_point_start") {
+          const p = msg.payload || {};
+          // p.id, p.x_norm, p.y_norm, p.t
+          console.log("[bridge] calib_point_start", p.id, p.x_norm, p.y_norm);
+          // здесь можно:
+          //  - подсветить overlay в браузере
+          //  - начать собирать данные webgazer для этого стимула
+        } else if (msg.type === "calib_point_end") {
+          console.log("[bridge] calib_point_end", msg.payload?.id);
+          // здесь можно остановить сбор данных для стимула
+        }
+        // аналогично можно обрабатывать stim_on/stim_off/task_start/task_end
+      } catch (e) {
+        console.log("[bridge] failed to parse incoming msg", e);
+      }
+    };
+
+    // Стартуем webgazer и шлём данные в Python
+    webgazer.setGazeListener(function (data, elapsedTime) {
+      if (!data) return;
+      const now = Date.now();
+      const sample = {
+        tracker_id: trackerId,
+        session_id: sessionId,
+        timestamp_ms: now,
+        x_norm: data.x / window.innerWidth,
+        y_norm: data.y / window.innerHeight,
+        confidence: 1.0,
+        validity: 0,
+        stim_id: null,
+        event: "stream",
+      };
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(sample));
+      }
+    }).begin();
+
+    // по желанию:
+    // webgazer.showVideoPreview(true).showPredictionPoints(true);
+  </script>
+</body>
+</html>

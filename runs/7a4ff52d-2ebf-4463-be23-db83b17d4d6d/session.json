@@ -1,0 +1,15 @@
+{
+  "session_id": "7a4ff52d-2ebf-4463-be23-db83b17d4d6d",
+  "os": "unknown",
+  "browser": null,
+  "width_px": 1280,
+  "height_px": 720,
+  "ppi": 96.0,
+  "distance_cm": 60.0,
+  "protocol": "9pt",
+  "dwell_ms": 1500,
+  "refresh_hz": null,
+  "lighting": null,
+  "webcam_fps_reported": null,
+  "tracker_version": null
+}

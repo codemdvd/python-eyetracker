@@ -1,0 +1,35 @@
+Metadata-Version: 2.4
+Name: python-eyetracker
+Version: 0.1.0
+Summary: Unified calibration and benchmarking framework for web and desktop eye trackers
+Author: Vasily Apasov
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: typer>=0.12
+Requires-Dist: pydantic>=2.8
+Requires-Dist: pandas>=2.2
+Requires-Dist: pyarrow>=17.0
+Requires-Dist: fastapi>=0.111
+Requires-Dist: uvicorn>=0.30
+Requires-Dist: websockets>=12.0
+Requires-Dist: numpy>=2.0
+Requires-Dist: scikit-learn>=1.5
+Requires-Dist: opencv-python>=4.10
+Requires-Dist: pyzmq>=26.0
+Requires-Dist: pygame>=2.5
+Requires-Dist: msgpack>=1.0
+
+# python-eyetracker
+
+
+Minimal MVP for unified calibration and benchmarking across WebGazer, TurkerGaze, Pupil Labs Core, and Optimeyes.
+
+
+## Quickstart
+```bash
+uvicorn eyetrk.web_bridge.server:app --reload & # if using web trackers
+eyetrack calibrate --trackers webgazer turkergaze pupilcore optimeyes --protocol 9pt
+eyetrack validate --trackers all
+eyetrack run-tasks --tasks fixation-grid step-saccades smooth-pursuit
+eyetrack report --runs runs
+```

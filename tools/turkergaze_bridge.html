@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TurkerGaze bridge</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+      padding-top: 16px;
+      box-sizing: border-box;
+    }
+    #video-container {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      background: #000;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 14px;
+    }
+    #controls {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      padding: 6px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <h2>TurkerGaze bridge</h2>
+  <div id="video-container">
+    <!-- сюда TurkerGaze может повесить свой <video>/<canvas> -->
+    <video id="tg_video" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+    <canvas id="tg_canvas" width="640" height="480"
+            style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;"></canvas>
+  </div>
+  <div id="status">Initializing...</div>
+  <div id="controls">
+    <button id="btn_calibrate">Start TurkerGaze Calibration</button>
+    <button id="btn_stream" disabled>Start streaming to Python</button>
+  </div>
+</div>
+
+<!-- TODO: сюда подключи свою библиотеку TurkerGaze -->
+<!-- <script src="turkergaze.js"></script> -->
+
+<script>
+  // Разбираем query-параметры, которые CLI прокидывает в URL:
+  // ?session_id=...&tracker_id=turkergaze&ws_port=8000
+  function getQueryParam(name) {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(name);
+  }
+
+  const sessionId = getQueryParam("session_id") || "";
+  const trackerId = getQueryParam("tracker_id") || "turkergaze";
+  const wsPort   = getQueryParam("ws_port") || "8000";
+
+  const statusEl = document.getElementById("status");
+  const btnCalib = document.getElementById("btn_calibrate");
+  const btnStream = document.getElementById("btn_stream");
+
+  let ws = null;
+  let streaming = false;
+
+  function logStatus(msg) {
+    console.log("[turkergaze_bridge]", msg);
+    statusEl.textContent = msg;
+  }
+
+  // ---------------- WebSocket ----------------
+  function connectWS() {
+    const url = `ws://localhost:${wsPort}/ws/${trackerId}`;
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      logStatus("WebSocket connected, waiting for calibration...");
+    };
+    ws.onclose = () => {
+      logStatus("WebSocket closed");
+    };
+    ws.onerror = (e) => {
+      console.error(e);
+      logStatus("WebSocket error");
+    };
+  }
+
+  function sendSample(xNorm, yNorm, confidence = 1.0) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const now = Date.now();
+    const payload = {
+      tracker_id: trackerId,
+      session_id: sessionId,
+      timestamp_ms: now,
+      x_norm: xNorm,
+      y_norm: yNorm,
+      confidence: confidence,
+      validity: 0,
+      stim_id: null,
+      event: "stream"
+    };
+    ws.send(JSON.stringify(payload));
+  }
+
+  // ---------------- TurkerGaze hook (заглушка) ----------------
+  //
+  // Здесь тебе нужно воткнуть реальные вызовы TurkerGaze:
+  //   - старт калибровки при нажатии на btnCalib
+  //   - регистрацию callback'а, который будет отдавать gaze_x, gaze_y.
+  //
+  // Ниже — псевдокодовый шаблон. Там, где TODO, вставляй реальные вызовы
+  // из твоей turkergaze-библиотеки.
+
+  let gazeCallbackAttached = false;
+
+  async function startTurkerGazeCalibration() {
+    logStatus("Starting TurkerGaze calibration...");
+    btnCalib.disabled = true;
+
+    // TODO: Инициализация TurkerGaze (примерно, псевдокод!):
+    //
+    //   await TurkerGaze.init({
+    //       videoElement: document.getElementById("tg_video"),
+    //       canvasElement: document.getElementById("tg_canvas")
+    //   });
+    //
+    //   await TurkerGaze.runCalibration(); // своя 9-точечная калибровка
+    //
+    // После завершения калибровки можно включать стрим.
+
+    // Пока TurkerGaze-API не подключен, просто имитируем задержку:
+    await new Promise(r => setTimeout(r, 2000));
+
+    logStatus("TurkerGaze calibration finished. You can start streaming.");
+    btnStream.disabled = false;
+
+    // Здесь регистрируем callback, который будет вызываться на каждом фрейме.
+    if (!gazeCallbackAttached) {
+      gazeCallbackAttached = true;
+
+      // Псевдокод: подписка на события движения взгляда:
+      //
+      //   TurkerGaze.onGaze((gx, gy, conf) => {
+      //       if (!streaming) return;
+      //       // gx, gy — в нормализованных координатах [0,1]
+      //       sendSample(gx, gy, conf);
+      //   });
+      //
+      // Пока API нет — сделаем простой таймер-заглушку, который шлёт
+      // фиксированную точку в центр.
+      setInterval(() => {
+        if (!streaming) return;
+        const gx = 0.5 + (Math.random() - 0.5) * 0.1;  // шум около центра
+        const gy = 0.5 + (Math.random() - 0.5) * 0.1;
+        sendSample(gx, gy, 1.0);
+      }, 50);
+    }
+  }
+
+  btnCalib.addEventListener("click", () => {
+    startTurkerGazeCalibration().catch(err => {
+      console.error(err);
+      logStatus("TurkerGaze calibration failed (see console).");
+      btnCalib.disabled = false;
+    });
+  });
+
+  btnStream.addEventListener("click", () => {
+    streaming = !streaming;
+    btnStream.textContent = streaming ? "Stop streaming" : "Start streaming to Python";
+    logStatus(streaming ? "Streaming gaze to Python..." : "Streaming stopped");
+  });
+
+  // Запускаем WebSocket при загрузке страницы
+  window.addEventListener("load", () => {
+    connectWS();
+    logStatus("Page loaded. Press \"Start TurkerGaze Calibration\".");
+  });
+</script>
+</body>
+</html>
