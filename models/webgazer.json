@@ -2,29 +2,51 @@
   "model_type": "poly2",
   "params": {
     "poly_features": {
-      "degree": 2,
+      "degree": 1,
       "include_bias": true,
       "interaction_only": false,
       "order": "C"
     },
+    "input_features": [
+      "x_norm",
+      "y_norm"
+    ],
+    "degree": 1,
+    "powers": [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
     "coef_x": [
-      0.0,
-      26962.34171971055,
-      19957.723357771734,
-      -15359.24347230839,
-      -34061.95651331291,
-      -7607.487170583584
+      -1.9415739476680756,
+      1710.158547434461,
+      -0.36346257803961635
     ],
-    "intercept_x": -9125.818783600116,
+    "intercept_x": 0.0,
     "coef_y": [
-      0.0,
-      7573.4280883621395,
-      -8941.76917904286,
-      -8434.737411439408,
-      18257.426310830546,
-      -10624.368579691032
+      1.2217877060174942,
+      -0.7113758974737721,
+      1068.4938051530917
     ],
-    "intercept_y": -811.4874830873079
+    "intercept_y": 0.0,
+    "ridge_alpha_x": 1e-06,
+    "ridge_alpha_y": 1e-06,
+    "candidate_degrees": [
+      1,
+      2
+    ],
+    "selection_cv_mae_px": 5.269789816303543,
+    "selection_train_mae_px": 3.4418750927727917,
+    "weighting_enabled": false
   },
   "fit_error_px": null
 }

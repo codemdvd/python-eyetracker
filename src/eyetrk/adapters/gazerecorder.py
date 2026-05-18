@@ -4,16 +4,14 @@ import numpy as np
 from typing import Callable, Optional
 
 from ..core.tracker import Tracker
-from ..core.types import CalibModel, Sample, TrackerInfo, sanitize_predicted_point
+from ..core.types import Sample, TrackerInfo, CalibModel, sanitize_predicted_point
 
 
-class WebGazerAdapter(Tracker):
+class GazerecorderAdapter(Tracker):
     """
-    Adapter for WebGazer.
-
-    WebGazer calibrates itself in the browser, so this adapter only receives
-    normalized gaze coordinates, converts them to stimulus pixels, and forwards
-    them into the shared logging pipeline.
+    Receives samples from the FastAPI WebSocket bridge.
+    Browser page (tools/gazerecorder_bridge.html) must send normalized gaze:
+      { tracker_id:"gazerecorder", session_id, timestamp_ms, x_norm, y_norm, confidence, ... }
     """
 
     def __init__(self):
@@ -23,14 +21,17 @@ class WebGazerAdapter(Tracker):
         self._out_w: int = 1280
         self._out_h: int = 720
         self.uses_internal_calibration: bool = True
+        self._sdk_calibrated: bool = False
 
     def initialize(self, config: dict) -> TrackerInfo:
         self._out_w = int(config.get("out_width", self._out_w))
         self._out_h = int(config.get("out_height", self._out_h))
+        self.uses_internal_calibration = bool(config.get("use_internal_calibration", False))
         version = config.get("version", "unknown")
-        return TrackerInfo(name="webgazer", version=version)
+        return TrackerInfo(name="gazerecorder", version=version)
 
     def set_external_model(self, model: CalibModel) -> None:
+        # Apply correction model on top of GR cloud output regardless of wizard state.
         self._model = model
 
     def start_stream(self, callback: Callable[[Sample], None], session_id: str | None = None) -> None:
@@ -41,9 +42,9 @@ class WebGazerAdapter(Tracker):
     def stop(self) -> None:
         self._cb = None
         self._session_id = None
+        self._sdk_calibrated = False
 
     def on_event(self, event: str, payload: dict | None = None) -> None:
-        """Forward stimulus events to the browser so WebGazer stays in sync."""
         if event == "bridge_start":
             payload = payload or {}
             screen_w = payload.get("screen_w")
@@ -62,7 +63,7 @@ class WebGazerAdapter(Tracker):
                 from eyetrk.web_bridge import server as bridge_server
 
                 bridge_server.push_event(
-                    "webgazer",
+                    "gazerecorder",
                     {
                         "type": "start",
                         "session_id": self._session_id,
@@ -78,7 +79,7 @@ class WebGazerAdapter(Tracker):
             payload = payload or {}
             try:
                 from eyetrk.web_bridge import server as bridge_server
-                bridge_server.push_event("webgazer", {"type": "stim_off", "stim_id": payload.get("id")})
+                bridge_server.push_event("gazerecorder", {"type": "stim_off", "stim_id": payload.get("id")})
             except Exception:
                 pass
             return
@@ -102,7 +103,7 @@ class WebGazerAdapter(Tracker):
             from eyetrk.web_bridge import server as bridge_server
 
             bridge_server.push_event(
-                "webgazer",
+                "gazerecorder",
                 {
                     "type": "stim",
                     "stim_id": stim_id,
@@ -110,13 +111,28 @@ class WebGazerAdapter(Tracker):
                     "y_px": y_px,
                     "target_x_px": x_px,
                     "target_y_px": y_px,
+                    "screen_w": self._out_w,
+                    "screen_h": self._out_h,
                 },
             )
         except Exception:
             return
 
     def emit(self, sample: Sample):
-        """Called by the web bridge when a browser sample arrives."""
+        # Called by web_bridge server when a browser sample arrives.
+        if sample.event == "internal_calibration":
+            self.uses_internal_calibration = True
+            return
+        if sample.event == "sdk_calibrated":
+            self._sdk_calibrated = True
+            return
+        if sample.event == "sdk_load_failed":
+            print(
+                "[gazerecorder] ERROR: GazeCloudAPI.js failed to load from CDN. "
+                "Check internet connection. GazeRecorder requires network access.",
+                flush=True,
+            )
+            return
         if self._session_id:
             if sample.session_id and sample.session_id != self._session_id:
                 return
@@ -141,49 +157,51 @@ class WebGazerAdapter(Tracker):
         if self._cb:
             self._cb(sample)
 
-    def _apply_model(self, xn: float, yn: float) -> tuple[float, float]:
+    def _apply_model(self, xn: float, yn: float) -> tuple[Optional[float], Optional[float]]:
         if self._model is None:
             return xn * self._out_w, yn * self._out_h
 
-        if self._model.model_type != "poly2":
-            return xn * self._out_w, yn * self._out_h
+        if self._model.model_type == "poly2":
+            params = self._model.params or {}
+            # New format: uses stored powers and input_features for arbitrary feature sets.
+            if "powers" in params and "input_features" in params:
+                feats = _build_poly_features(
+                    params,
+                    {
+                        "x_norm": float(xn),
+                        "y_norm": float(yn),
+                    },
+                )
+                if feats is None:
+                    return xn * self._out_w, yn * self._out_h
+                try:
+                    coef_x = np.array(params["coef_x"], dtype=float)
+                    coef_y = np.array(params["coef_y"], dtype=float)
+                    ix = float(params["intercept_x"])
+                    iy = float(params["intercept_y"])
+                except Exception:
+                    return None, None
+                xp = float(np.dot(feats, coef_x) + ix)
+                yp = float(np.dot(feats, coef_y) + iy)
+                return xp, yp
 
-        params = self._model.params or {}
-        if "powers" in params and "input_features" in params:
-            feats = _build_poly_features(
-                params,
-                {
-                    "x_norm": float(xn),
-                    "y_norm": float(yn),
-                },
-            )
-            if feats is None:
-                return xn * self._out_w, yn * self._out_h
+            # Legacy 2-feature poly2
             try:
                 coef_x = np.array(params["coef_x"], dtype=float)
                 coef_y = np.array(params["coef_y"], dtype=float)
                 ix = float(params["intercept_x"])
                 iy = float(params["intercept_y"])
             except Exception:
-                return xn * self._out_w, yn * self._out_h
+                return None, None
+
+            x1 = float(xn)
+            x2 = float(yn)
+            feats = np.array([1.0, x1, x2, x1 * x1, x1 * x2, x2 * x2], dtype=float)
             xp = float(np.dot(feats, coef_x) + ix)
             yp = float(np.dot(feats, coef_y) + iy)
             return xp, yp
 
-        try:
-            coef_x = np.array(params["coef_x"], dtype=float)
-            coef_y = np.array(params["coef_y"], dtype=float)
-            ix = float(params["intercept_x"])
-            iy = float(params["intercept_y"])
-        except Exception:
-            return xn * self._out_w, yn * self._out_h
-
-        x1 = float(xn)
-        x2 = float(yn)
-        feats = np.array([1.0, x1, x2, x1 * x1, x1 * x2, x2 * x2], dtype=float)
-        xp = float(np.dot(feats, coef_x) + ix)
-        yp = float(np.dot(feats, coef_y) + iy)
-        return xp, yp
+        return None, None
 
 
 def _build_poly_features(params: dict, feats_map: dict) -> Optional[np.ndarray]:

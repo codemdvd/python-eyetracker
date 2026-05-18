@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GazeRecorder bridge</title>
+  <style>
+    body { font-family: "Segoe UI", Tahoma, sans-serif; margin: 16px; }
+    .row { margin-bottom: 8px; }
+    .mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+    .badge { padding: 2px 8px; border-radius: 10px; background: #eee; display: inline-block; }
+    .ok { background: #d1fae5; }
+    .warn { background: #fee2e2; }
+    button { margin-right: 8px; padding: 6px 10px; }
+    #fsHint { background: #fef9c3; border: 1px solid #ca8a04; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+    #fsHint button { margin-left: 12px; padding: 4px 10px; cursor: pointer; }
+
+    /* Calibration overlay — z-index must exceed GazeRecorder SDK's error overlay (99999) */
+    #calibOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #ffffff;
+      z-index: 100000;
+    }
+    #calibInstruction {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 15px;
+      font-family: "Segoe UI", sans-serif;
+      z-index: 100002;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #calibRing {
+      position: fixed;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: rgba(220, 38, 38, 0.18);
+      transform: translate(-50%, -50%);
+      z-index: 100001;
+      pointer-events: none;
+      transition: left 0.12s ease, top 0.12s ease;
+    }
+    #calibDot {
+      position: fixed;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #dc2626;
+      transform: translate(-50%, -50%);
+      z-index: 100002;
+      pointer-events: none;
+      transition: left 0.12s ease, top 0.12s ease;
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #dc2626;
+    }
+    @keyframes calibPulse {
+      0%   { transform: translate(-50%, -50%) scale(2.5); opacity: 0.2; }
+      100% { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
+    }
+    #calibDot.pulse { animation: calibPulse 0.25s ease-out forwards; }
+
+    /* Task overlay — z-index must exceed GazeRecorder SDK overlays (99999) */
+    #taskOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #ffffff;
+      z-index: 100000;
+    }
+    #taskDot {
+      display: none;
+      position: fixed;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #2563eb;
+      transform: translate(-50%, -50%);
+      z-index: 100003;
+      pointer-events: none;
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #2563eb;
+    }
+    #taskDot.smooth { transition: left 0.08s linear, top 0.08s linear; }
+    @keyframes taskPulse {
+      0%   { transform: translate(-50%, -50%) scale(2); opacity: 0.3; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+    #taskDot.pulse { animation: taskPulse 0.2s ease-out forwards; }
+  </style>
+</head>
+<body>
+  <div id="fsHint">
+    For best accuracy, go <strong>fullscreen</strong> before calibration starts (press <strong>F11</strong>).
+    <button id="fsHintBtn">Go fullscreen</button>
+    <button onclick="document.getElementById('fsHint').style.display='none'" style="background:#eee">Dismiss</button>
+  </div>
+
+  <!-- Status panel (hidden by overlays during calibration/tasks) -->
+  <h1>GazeRecorder bridge</h1>
+  <div class="row">WS: <span id="wsState" class="badge warn">disconnected</span></div>
+  <div class="row">SDK: <span id="sdkState" class="badge warn">missing</span></div>
+  <div class="row">Session: <span id="sessionId" class="mono">(none)</span></div>
+  <div class="row">Tracker: <span id="trackerId" class="mono">gazerecorder</span></div>
+  <div class="row">Last stim: <span id="stimState" class="mono">(none)</span></div>
+  <div class="row">Samples: <span id="sampleCount" class="mono">0</span></div>
+  <div class="row">
+    <button id="btnStart">Start gaze</button>
+    <button id="btnStop">Stop gaze</button>
+  </div>
+  <pre id="lastSample" class="mono"></pre>
+
+  <!-- Calibration overlay (shown during 9pt calib stims) -->
+  <div id="calibOverlay">
+    <div id="calibInstruction">Look at the red dot</div>
+    <div id="calibRing"></div>
+    <div id="calibDot"></div>
+  </div>
+
+  <!-- Task overlay -->
+  <div id="taskOverlay"></div>
+  <div id="taskDot"></div>
+
+  <script>
+    (() => {
+      // Maximise the app window on load (works in Chrome --app mode and popups).
+      try { window.moveTo(0, 0); window.resizeTo(screen.availWidth, screen.availHeight); } catch(e) {}
+
+      const params = new URLSearchParams(window.location.search);
+      const trackerId = params.get("tracker_id") || "gazerecorder";
+      const wsPort = params.get("ws_port") || "8000";
+      let sessionId = params.get("session_id") || "";
+      const wsHostParam = params.get("ws_host");
+      const screenWParam = Number(params.get("screen_w"));
+      const screenHParam = Number(params.get("screen_h"));
+
+      // Restore session state saved before a self-reload (GR recalibration)
+      if (sessionStorage.getItem('_gr_calib_reloaded') === '1') {
+        const savedSid = sessionStorage.getItem('_gr_saved_session_id');
+        if (savedSid) sessionId = savedSid;
+        // screenW/screenH will be restored via setScreenOverride after variables are declared
+      }
+      const enableInternalCalibration = params.get("internal_calib") === "1";
+      const autoStart = params.get("auto_start") !== "0";
+
+      document.getElementById("trackerId").textContent = trackerId;
+      document.getElementById("sessionId").textContent = sessionId || "(none)";
+
+      const wsState = document.getElementById("wsState");
+      const sdkState = document.getElementById("sdkState");
+      const stimState = document.getElementById("stimState");
+      const sampleCountEl = document.getElementById("sampleCount");
+      const lastSampleEl = document.getElementById("lastSample");
+
+      // Overlay elements
+      const calibOverlay   = document.getElementById("calibOverlay");
+      const calibDot       = document.getElementById("calibDot");
+      const calibRing      = document.getElementById("calibRing");
+      const calibInstruction = document.getElementById("calibInstruction");
+      const taskOverlay    = document.getElementById("taskOverlay");
+      const taskDot        = document.getElementById("taskDot");
+
+      let ws = null;
+      let reconnectTimer = null;
+      const reconnectDelayMs = 500;
+      const wsHosts = Array.from(
+        new Set([wsHostParam, window.location.hostname, "127.0.0.1", "localhost"].filter(Boolean))
+      );
+      let wsHostIdx = 0;
+      let wsFailures = 0;
+      let gazeStarted = false;
+      let sdkEnsurePromise = null;
+      let internalMarked = false;
+      let autoStartTimer = null;
+      let autoClickObserver = null;
+      let lastSampleAt = 0;
+      let startIssuedAt = 0;
+      let startFailures = 0;
+      let forceFlow = false;
+      const useGazeFlow = true; // always prefer StartGazeFlow so the cloud model is calibrated in current screen geometry
+      let internalFlowUsed = false;
+      let allowRetry = false;
+      let pollTimer = null;
+      let inTaskPhase = false;
+      let lastCalibStimId = null;
+      let lastTaskStimId = null;
+      let sdkCalibSent = false;
+      let _calibStartMs = 0;        // when StartEyeTracking was issued — for cached-model detection
+      let _showCalibUsed = false;   // whether we already called ShowCalibration()
+      let _showCalibObserver = null; // MutationObserver watching CalDivId visibility
+      let _showCalibForceAccept = false; // set by 110s timeout to bypass wizard gate
+      let screenW = Number.isFinite(screenWParam) && screenWParam > 0 ? screenWParam : null;
+      let screenH = Number.isFinite(screenHParam) && screenHParam > 0 ? screenHParam : null;
+
+      const state = { stim: null, samples: 0 };
+
+      // ---- Overlay helpers ----
+
+      function showCalibDot(xPx, yPx, stimId) {
+        const bx = (xPx / getScaleW()) * window.innerWidth;
+        const by = (yPx / getScaleH()) * window.innerHeight;
+        calibDot.style.left = bx + "px";
+        calibDot.style.top  = by + "px";
+        calibRing.style.left = bx + "px";
+        calibRing.style.top  = by + "px";
+        if (stimId !== lastCalibStimId) {
+          calibDot.classList.remove("pulse");
+          void calibDot.offsetWidth;
+          calibDot.classList.add("pulse");
+          lastCalibStimId = stimId;
+        }
+        calibOverlay.style.display = "block";
+        calibDot.style.display = "block";
+        calibRing.style.display = "block";
+      }
+
+      function hideCalibDot() {
+        calibOverlay.style.display = "none";
+        calibDot.style.display = "none";
+        calibRing.style.display = "none";
+        lastCalibStimId = null;
+      }
+
+      function showTaskDot(xPx, yPx, stimId) {
+        const bx = (xPx / getScaleW()) * window.innerWidth;
+        const by = (yPx / getScaleH()) * window.innerHeight;
+        const isPursuit = typeof stimId === "string" && stimId.startsWith("pursuit");
+        taskDot.classList.remove("smooth", "pulse");
+        void taskDot.offsetWidth;
+        if (isPursuit) taskDot.classList.add("smooth");
+        taskDot.style.left = bx + "px";
+        taskDot.style.top  = by + "px";
+        taskDot.style.display = "block";
+        taskOverlay.style.display = "block";
+        if (stimId !== lastTaskStimId) {
+          taskDot.classList.add("pulse");
+          lastTaskStimId = stimId;
+        }
+      }
+
+      function hideTaskDot() {
+        taskDot.style.display = "none";
+        taskOverlay.style.display = "none";
+        lastTaskStimId = null;
+      }
+
+      // ---- State helpers ----
+
+      function setWsState(ok) {
+        wsState.textContent = ok ? "connected" : "disconnected";
+        wsState.className = `badge ${ok ? "ok" : "warn"}`;
+      }
+
+      function setScreenOverride(w, h) {
+        const nw = Number(w), nh = Number(h);
+        if (Number.isFinite(nw) && nw > 0) screenW = nw;
+        if (Number.isFinite(nh) && nh > 0) screenH = nh;
+      }
+
+      // Restore screen dimensions saved before a self-reload
+      if (sessionStorage.getItem('_gr_calib_reloaded') === '1') {
+        const sw = Number(sessionStorage.getItem('_gr_saved_screen_w'));
+        const sh = Number(sessionStorage.getItem('_gr_saved_screen_h'));
+        if (sw > 0 || sh > 0) setScreenOverride(sw || screenW, sh || screenH);
+      }
+
+      function setSdkState(ok) {
+        sdkState.textContent = ok ? "found" : "missing";
+        sdkState.className = `badge ${ok ? "ok" : "warn"}`;
+      }
+
+      function currentWsHost() {
+        return wsHosts[Math.max(0, Math.min(wsHostIdx, wsHosts.length - 1))] || "localhost";
+      }
+
+      function noteWsFailure() {
+        wsFailures += 1;
+        if (wsFailures % 3 === 0 && wsHosts.length > 1) {
+          wsHostIdx = (wsHostIdx + 1) % wsHosts.length;
+        }
+      }
+
+      function scheduleReconnect() {
+        if (reconnectTimer) return;
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs(); }, reconnectDelayMs);
+      }
+
+      function isCalibrationStim(stimId) {
+        return typeof stimId === "string" && stimId.startsWith("calib_");
+      }
+
+      // ---- Fullscreen helpers ----
+
+      // Show a click-to-fullscreen gate overlay, then call onReady().
+      // If already fullscreen, calls onReady() immediately.
+      function requireFullscreen(onReady) {
+        if (document.fullscreenElement) { onReady(); return; }
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+        if (!req) { onReady(); return; } // browser doesn't support fullscreen API
+
+        const gate = document.createElement("div");
+        gate.id = "fsGate";
+        gate.style.cssText = [
+          "position:fixed","inset:0","background:rgba(0,0,0,0.92)","color:#fff",
+          "display:flex","align-items:center","justify-content:center","flex-direction:column",
+          "z-index:200000","cursor:pointer","text-align:center","font-family:'Segoe UI',sans-serif",
+        ].join(";");
+        gate.innerHTML = [
+          "<p style='font-size:22px;margin:0 0 12px'>Eye tracker calibration</p>",
+          "<p style='font-size:15px;opacity:0.75;margin:0 0 24px'>Fullscreen is required for accurate calibration.</p>",
+          "<button style='font-size:18px;padding:12px 32px;border-radius:8px;border:none;",
+          "background:#2563eb;color:#fff;cursor:pointer'>Click here to enter fullscreen &amp; start</button>",
+        ].join("");
+        document.body.appendChild(gate);
+
+        gate.onclick = () => {
+          req.call(el)
+            .then(() => { gate.remove(); onReady(); })
+            .catch(() => { gate.remove(); onReady(); }); // fullscreen denied — proceed anyway
+        };
+      }
+
+      function tryFullscreen() {
+        if (document.fullscreenElement) return;
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+        if (!req) return;
+        try {
+          req.call(el).then(() => {
+            const hint = document.getElementById("fsHint");
+            if (hint) hint.style.display = "none";
+          }).catch(() => {
+            // Permission not yet granted — show manual hint
+            const hint = document.getElementById("fsHint");
+            if (hint) hint.style.display = "block";
+          });
+        } catch (err) {
+          const hint = document.getElementById("fsHint");
+          if (hint) hint.style.display = "block";
+        }
+      }
+
+      // ---- WebSocket ----
+
+      function connectWs() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+        try { if (ws) ws.close(); } catch (err) {}
+        const host = currentWsHost();
+        ws = new WebSocket(`ws://${host}:${wsPort}/ws/${trackerId}`);
+        wsState.title = `ws://${host}:${wsPort}`;
+        ws.onopen = () => { wsFailures = 0; setWsState(true); };
+        ws.onclose = () => { setWsState(false); noteWsFailure(); scheduleReconnect(); };
+        ws.onerror = () => { setWsState(false); noteWsFailure(); };
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            const payload = msg && msg.payload ? msg.payload : msg;
+            const msgType = (payload && payload.type) || msg.type;
+
+            if (msgType === "start") {
+              try { window.focus(); } catch (err) {}
+              if (payload && payload.session_id) {
+                sessionId = String(payload.session_id);
+                document.getElementById("sessionId").textContent = sessionId || "(none)";
+              }
+              if (payload && (payload.screen_w || payload.screen_h)) {
+                setScreenOverride(payload.screen_w, payload.screen_h);
+              }
+              const isCalibPhase = !payload || !payload.phase || payload.phase === "calibration";
+              inTaskPhase = !isCalibPhase;
+
+              if (isCalibPhase) {
+                // Soft reset: clear state flags but keep SDK running if already connected.
+                // Full resetGazeRuntime() stops camera+GazeFlow, then tryFullscreen() goes
+                // fullscreen, and the camera permission dialog is blocked in fullscreen — so
+                // the SDK can't restart. Instead, keep gaze running and only reset our bookkeeping.
+                sdkCalibSent = false;
+                internalMarked = false;
+                internalFlowUsed = false;
+                _calibStartMs = 0;
+                _showCalibUsed = false;
+                _showCalibForceAccept = false;
+                if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+                state.stim = null;
+                lastCalibStimId = null;
+                hideCalibDot();
+                hideTaskDot();
+                const fsHint = document.getElementById("fsHint");
+                if (fsHint) fsHint.style.display = "none";
+
+                requireFullscreen(() => {
+                  if (!gazeStarted) {
+                    // SDK not running yet — start it now that we're fullscreen.
+                    ensureSdkOnce().then((ok) => {
+                      if (ok) { allowRetry = true; startGazeWithRetry(); }
+                    });
+                  } else {
+                    // SDK already running — must recalibrate in current fullscreen geometry.
+                    // The cloud model may have been trained in a different window size.
+                    internalFlowUsed = true;
+                    const _api = window.GazeCloudAPI;
+                    if (_api && typeof _api.ShowCalibration === "function") {
+                      if (!_showCalibUsed) {
+                        // Not yet called (normal path): call ShowCalibration now.
+                        _showCalibUsed = true;
+                        try {
+                          _api.ShowCalibration();
+                        } catch (_err) {
+                          console.log("[bridge] ShowCalibration (gazeStarted path) failed:", _err);
+                          _showCalibUsed = false;
+                          internalFlowUsed = false;
+                          sendSdkCalibrated();
+                          return;
+                        }
+                      } else {
+                        // Already called by fast-detection in sendSdkCalibrated — wizard is
+                        // running. Just install a fresh watcher (old one was cleared by the
+                        // "start" handler's state reset) and reset the 110s safety timeout.
+                        console.log("[bridge] gazeStarted path: ShowCalibration already running, attaching fresh watcher");
+                      }
+                      if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+                      _startShowCalibWatcher();
+                      setTimeout(() => {
+                        if (!sdkCalibSent) {
+                          if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+                          _showCalibForceAccept = true;
+                          sendSdkCalibrated();
+                        }
+                      }, 110_000);
+                    } else if (!sessionStorage.getItem('_gr_calib_reloaded')) {
+                      // ShowCalibration not available — reload to get a fresh GR calibration
+                      // in the current screen geometry (localStorage clear may drop cached model).
+                      sessionStorage.setItem('_gr_calib_reloaded', '1');
+                      if (sessionId) sessionStorage.setItem('_gr_saved_session_id', sessionId);
+                      if (screenW) sessionStorage.setItem('_gr_saved_screen_w', String(screenW));
+                      if (screenH) sessionStorage.setItem('_gr_saved_screen_h', String(screenH));
+                      try { localStorage.clear(); } catch (e) {}
+                      console.log("[bridge] gazeStarted path: reloading to force fresh GR calibration");
+                      setTimeout(() => window.location.reload(true), 200);
+                      return;
+                    } else {
+                      internalFlowUsed = false;
+                      sendSdkCalibrated();
+                    }
+                  }
+                });
+              } else {
+                // Tasks: keep gaze running, show task overlay
+                state.stim = null;
+                hideCalibDot();
+                taskOverlay.style.display = "block";
+                if (!gazeStarted) {
+                  ensureSdkOnce().then((ok) => {
+                    if (ok) { allowRetry = true; startGazeWithRetry(); }
+                  });
+                } else {
+                  // SDK already running — Python creates a fresh adapter for tasks
+                  // (with _sdk_calibrated=False), so resend the signal immediately.
+                  sdkCalibSent = false;
+                  sendSdkCalibrated();
+                }
+              }
+              return;
+            }
+
+            if (msgType === "reload") {
+              console.log("[bridge] Received reload command — clearing GR session storage and reloading");
+              // Allow one self-reload on the next calibration start (reset the guard)
+              sessionStorage.removeItem('_gr_calib_reloaded');
+              // Clear localStorage to force GazeRecorder to drop its cached cloud model
+              try { localStorage.clear(); } catch (e) {}
+              setTimeout(() => window.location.reload(true), 200);
+              return;
+            }
+
+            // stim_off
+            if (msgType === "stim_off") {
+              hideCalibDot();
+              if (inTaskPhase) {
+                taskDot.style.display = "none";
+                taskDot.classList.remove("smooth", "pulse");
+                lastTaskStimId = null;
+              } else {
+                hideTaskDot();
+              }
+              state.stim = null;
+              return;
+            }
+
+            if (!payload || msgType !== "stim") return;
+            const stimId = payload.stim_id || payload.id || null;
+            const xPx = payload.x_px ?? payload.target_x_px;
+            const yPx = payload.y_px ?? payload.target_y_px;
+            if (payload.screen_w || payload.screen_h) {
+              setScreenOverride(payload.screen_w, payload.screen_h);
+            }
+            const train = isCalibrationStim(stimId);
+            state.stim = { stim_id: stimId, x_px: xPx, y_px: yPx, train };
+            stimState.textContent = JSON.stringify(state.stim);
+
+            ensureSdkOnce().then((ok) => {
+              if (ok && !gazeStarted) { allowRetry = true; startGazeWithRetry(); }
+              if (train) {
+                hideTaskDot();
+                if (Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                  showCalibDot(xPx, yPx, stimId);
+                }
+                // Provide calibration point to GazeRecorder if API supports it
+                if (enableInternalCalibration && Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                  recordCalibrationPoint(xPx, yPx, stimId);
+                }
+              } else {
+                hideCalibDot();
+                if (Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                  showTaskDot(xPx, yPx, stimId);
+                }
+              }
+            });
+          } catch (err) {
+            console.log("[bridge] failed to parse incoming msg", err);
+          }
+        };
+      }
+
+      function sendSample(sample) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(sample));
+        }
+      }
+
+      // ---- GazeRecorder lifecycle ----
+
+      function resetGazeRuntime() {
+        try { stopGaze(); } catch (err) {}
+        if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+        gazeStarted = false;
+        lastSampleAt = 0;
+        startIssuedAt = 0;
+        _calibStartMs = 0;
+        _showCalibUsed = false;
+        _showCalibForceAccept = false;
+        startFailures = 0;
+        allowRetry = false;
+        forceFlow = false;
+        internalFlowUsed = false;
+        internalMarked = false;
+        sdkCalibSent = false;
+        state.stim = null;
+        hideCalibDot();
+      }
+
+      function recordCalibrationPoint(xPx, yPx, stimId) {
+        if (!window.GazeCloudAPI) return false;
+        const api = window.GazeCloudAPI;
+        const candidates = ["RecordScreenPosition", "AddCalibrationPoint", "CollectCalibrationData"];
+        for (const name of candidates) {
+          const fn = api[name];
+          if (typeof fn === "function") {
+            try { fn.call(api, xPx, yPx, stimId); return true; } catch (err) {}
+          }
+        }
+        return false;
+      }
+
+      function getScaleW() {
+        if (Number.isFinite(screenW) && screenW > 0) return screenW;
+        if (window.screen && Number.isFinite(window.screen.width)) return window.screen.width;
+        return window.innerWidth || 1;
+      }
+
+      function getScaleH() {
+        if (Number.isFinite(screenH) && screenH > 0) return screenH;
+        if (window.screen && Number.isFinite(window.screen.height)) return window.screen.height;
+        return window.innerHeight || 1;
+      }
+
+      function handleGazeXYpx(xPx, yPx, conf = 1.0, rawGazeX = null, rawGazeY = null, docX = null, docY = null) {
+        const w = getScaleW(), h = getScaleH();
+        const xNorm = xPx / w, yNorm = yPx / h;
+        if (!Number.isFinite(xNorm) || !Number.isFinite(yNorm)) return;
+        if (xNorm < -0.25 || xNorm > 1.25 || yNorm < -0.25 || yNorm > 1.25) return;
+
+        const sample = {
+          tracker_id: trackerId,
+          session_id: sessionId,
+          timestamp_ms: Date.now(),
+          x_norm: xNorm,
+          y_norm: yNorm,
+          confidence: conf,
+          validity: 0,
+          stim_id: state.stim ? state.stim.stim_id : null,
+          target_x_px: state.stim ? state.stim.x_px : null,
+          target_y_px: state.stim ? state.stim.y_px : null,
+          event: state.stim ? (state.stim.train ? "calibration" : "task") : "stream",
+          inner_h: window.innerHeight,
+          inner_w: window.innerWidth,
+          fullscreen: document.fullscreenElement ? 1 : 0,
+          gr_gaze_x: rawGazeX,
+          gr_gaze_y: rawGazeY,
+          gr_doc_x: docX,
+          gr_doc_y: docY,
+        };
+        state.samples += 1;
+        sampleCountEl.textContent = String(state.samples);
+        lastSampleEl.textContent = JSON.stringify(sample, null, 2);
+        lastSampleAt = Date.now();
+        startFailures = 0;
+        sendSample(sample);
+      }
+
+      function markInternalCalibration() {
+        if (!(enableInternalCalibration || internalFlowUsed) || internalMarked) return;
+        internalMarked = true;
+        sendSample({
+          tracker_id: trackerId,
+          session_id: sessionId,
+          timestamp_ms: Date.now(),
+          confidence: 1.0,
+          validity: 0,
+          event: "internal_calibration",
+        });
+      }
+
+      function autoClickStartCalibration() {
+        function tryClick() {
+          const selectors = ["button", "input[type='button']", "input[type='submit']", "[role='button']", "a", "div", "span"];
+          const candidates = Array.from(document.querySelectorAll(selectors.join(",")));
+          for (const el of candidates) {
+            const label = (el.innerText || el.value || el.getAttribute("aria-label") || "").trim().toLowerCase();
+            const elId = (el.id || "").trim().toLowerCase();
+            if (!label) continue;
+            if (label.includes("start gaze calibration") || label.includes("start gaze") ||
+                label.includes("start calibration") || elId.includes("start")) {
+              try { el.click(); return true; } catch (err) { return false; }
+            }
+          }
+          return false;
+        }
+        if (tryClick()) return;
+        if (autoClickObserver) return;
+        const timer = setInterval(() => { if (tryClick()) clearInterval(timer); }, 500);
+        autoClickObserver = new MutationObserver(() => {
+          if (tryClick()) { autoClickObserver.disconnect(); autoClickObserver = null; clearInterval(timer); }
+        });
+        autoClickObserver.observe(document.body, { childList: true, subtree: true });
+      }
+
+      function pickNumber(data, keys) {
+        for (const k of keys) {
+          if (data && data[k] != null) { const v = Number(data[k]); if (Number.isFinite(v)) return v; }
+        }
+        return null;
+      }
+
+      function resolveGazeXY(data) {
+        const candidates = [["GazeX","GazeY"],["gazeX","gazeY"],["X","Y"],["x","y"],["docX","docY"],["screenX","screenY"]];
+        for (const [kx, ky] of candidates) {
+          const x = pickNumber(data, [kx]), y = pickNumber(data, [ky]);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          let xPx = x, yPx = y;
+          if (x <= 1 && y <= 1) { xPx = x * getScaleW(); yPx = y * getScaleH(); }
+          return { xPx, yPx };
+        }
+        return null;
+      }
+
+      function readGazeFromApi() {
+        const api = window.GazeCloudAPI;
+        if (!api) return null;
+        let xy = resolveGazeXY(api);
+        if (!xy && typeof api.GetGaze === "function") {
+          try { xy = resolveGazeXY(api.GetGaze()); } catch (err) { return null; }
+        }
+        return xy;
+      }
+
+      function handleGazeData(data) {
+        const xy = resolveGazeXY(data);
+        if (!xy) return;
+        let conf = 1.0;
+        const c1 = pickNumber(data, ["confidence", "Confidence"]);
+        if (Number.isFinite(c1)) conf = c1;
+        // Attach raw server values so they appear in the CSV for diagnostics.
+        const _rawGazeX = pickNumber(data, ["GazeX", "gazeX"]);
+        const _rawGazeY = pickNumber(data, ["GazeY", "gazeY"]);
+        const _docX = pickNumber(data, ["docX"]);
+        const _docY = pickNumber(data, ["docY"]);
+        handleGazeXYpx(xy.xPx, xy.yPx, conf, _rawGazeX, _rawGazeY, _docX, _docY);
+        // Signal Python when SDK calibration is done. OnCalibrationComplete is preferred
+        // (set in installGazeHooks). Only use the first-valid-gaze heuristic when we are
+        // NOT waiting for the GazeFlow wizard (internalFlowUsed means wizard is running and
+        // OnCalibrationComplete will fire — using the heuristic here would signal too early
+        // with the still-uncalibrated cloud model).
+        if (!sdkCalibSent && !internalFlowUsed && Math.abs(xy.yPx) > getScaleH() * 0.03) {
+          sendSdkCalibrated();
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(() => {
+          if (!gazeStarted) return;
+          if (Date.now() - lastSampleAt < 80) return;
+          const xy = readGazeFromApi();
+          if (!xy) return;
+          handleGazeXYpx(xy.xPx, xy.yPx, 1.0);
+        }, 100);
+      }
+
+      // Poll until CalDivId exists, then watch it with a MutationObserver.
+      // Fires sendSdkCalibrated() when the wizard transitions visible → hidden AND
+      // CalDivId stays hidden for SETTLE_MS, to wait for the GR cloud model to stop
+      // updating before Python starts collecting calibration stim data.
+      const _GR_SETTLE_MS = 4000;
+      function _startShowCalibWatcher() {
+        let _settleTimer = null;
+
+        function install(calDiv) {
+          let wizardWasVisible = calDiv.style.display === "block";
+          console.log("[bridge] CalDivId found, display='" + calDiv.style.display + "', wasVisible=" + wizardWasVisible);
+          _showCalibObserver = new MutationObserver(() => {
+            const nowVisible = calDiv.style.display === "block";
+            if (nowVisible) {
+              wizardWasVisible = true;
+              if (_settleTimer) { clearTimeout(_settleTimer); _settleTimer = null; }
+              console.log("[bridge] CalDivId → visible (wizard started/resumed)");
+            } else if (wizardWasVisible) {
+              // CalDivId hid — could be brief between-dot transition or final wizard end.
+              // Wait _GR_SETTLE_MS; if CalDivId stays hidden, wizard is truly done.
+              if (_settleTimer) clearTimeout(_settleTimer);
+              _settleTimer = setTimeout(() => {
+                _settleTimer = null;
+                console.log("[bridge] CalDivId stayed hidden " + _GR_SETTLE_MS + "ms — wizard done, model stabilized");
+                _showCalibObserver.disconnect();
+                _showCalibObserver = null;
+                sendSdkCalibrated();
+              }, _GR_SETTLE_MS);
+              console.log("[bridge] CalDivId → hidden, waiting " + _GR_SETTLE_MS + "ms for model to stabilize...");
+            }
+          });
+          _showCalibObserver.observe(calDiv, { attributes: true, attributeFilter: ["style"] });
+        }
+
+        function poll(attempts) {
+          const calDiv = document.getElementById("CalDivId");
+          if (calDiv) { install(calDiv); return; }
+          if (attempts < 60) setTimeout(() => poll(attempts + 1), 100);
+          else console.log("[bridge] CalDivId never created — wizard watcher abandoned, 110s timeout is fallback");
+        }
+        poll(0);
+      }
+
+      function sendSdkCalibrated() {
+        if (sdkCalibSent) return;
+
+        if (_showCalibUsed && !_showCalibForceAccept) {
+          // MutationObserver (_startShowCalibWatcher) is tracking CalDivId.
+          // All OnCalibrationComplete calls here are partial server updates —
+          // ignore them; the observer will call sendSdkCalibrated when wizard hides.
+          console.log("[bridge] ShowCalibration in progress — ignoring premature OnCalibrationComplete");
+          return;
+
+        } else if (!_showCalibUsed && internalFlowUsed) {
+          // First OnCalibrationComplete fired too fast after StartEyeTracking —
+          // cloud returned a cached model from a previous session with different screen
+          // geometry. Try ShowCalibration, then fall back to a self-reload with
+          // localStorage clear (forces GazeRecorder to drop its cached cloud model).
+          //
+          // Use startIssuedAt as fallback when _calibStartMs was reset by the "start"
+          // handler (the race: auto-start fires → Python sends "start" → resets
+          // _calibStartMs = 0 → GR fires fast OnCalibrationComplete → check fails).
+          const _refTime = _calibStartMs > 0 ? _calibStartMs : startIssuedAt;
+          const elapsed = _refTime > 0 ? Date.now() - _refTime : 999999;
+          if (elapsed < 15_000) {
+            console.log("[bridge] GR fast completion (" + Math.round(elapsed) + "ms) — cloud cached model detected");
+            _showCalibUsed = true;
+            const api = window.GazeCloudAPI;
+            if (api && typeof api.ShowCalibration === "function") {
+              try {
+                api.ShowCalibration();
+                _startShowCalibWatcher();
+                return;
+              } catch (err) {
+                console.log("[bridge] ShowCalibration failed:", err);
+              }
+            }
+            // ShowCalibration unavailable — self-reload with storage clear (once per session)
+            if (!sessionStorage.getItem('_gr_calib_reloaded')) {
+              sessionStorage.setItem('_gr_calib_reloaded', '1');
+              // Preserve session info so stim samples match Python's session_id after reload
+              if (sessionId) sessionStorage.setItem('_gr_saved_session_id', sessionId);
+              if (screenW) sessionStorage.setItem('_gr_saved_screen_w', String(screenW));
+              if (screenH) sessionStorage.setItem('_gr_saved_screen_h', String(screenH));
+              console.log("[bridge] Reloading page with localStorage clear to force GR recalibration");
+              try { localStorage.clear(); } catch (e) {}
+              setTimeout(() => window.location.reload(true), 200);
+              return; // don't send sdk_calibrated yet — fresh page will handle it
+            }
+            console.log("[bridge] Already reloaded — proceeding with GR model as-is");
+          }
+        }
+
+        sdkCalibSent = true;
+        sendSample({
+          tracker_id: trackerId, session_id: sessionId,
+          timestamp_ms: Date.now(), event: "sdk_calibrated",
+          x_norm: 0, y_norm: 0, confidence: 1.0, validity: 0,
+        });
+      }
+
+      function installGazeHooks() {
+        let ok = false;
+        if (window.GazeCloudAPI) {
+          const api = window.GazeCloudAPI;
+          if ("OnResult" in api) { api.OnResult = handleGazeData; ok = true; }
+          else if ("OnGazeData" in api) { api.OnGazeData = handleGazeData; ok = true; }
+          else if ("OnData" in api) { api.OnData = handleGazeData; ok = true; }
+          // Hook OnCalibrationComplete so Python knows the SDK wizard finished.
+          api.OnCalibrationComplete = sendSdkCalibrated;
+        }
+        if (typeof window.PlotGaze === "function") {
+          const orig = window.PlotGaze;
+          window.PlotGaze = function(x, y, ...rest) {
+            if (Number.isFinite(x) && Number.isFinite(y)) handleGazeXYpx(Number(x), Number(y), 1.0);
+            return orig.call(this, x, y, ...rest);
+          };
+          ok = true;
+        }
+        setSdkState(ok);
+        return ok;
+      }
+
+      function loadSdk(url) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = url;
+          script.async = true;
+          script.onload = () => resolve(true);
+          script.onerror = () => reject(new Error(`Failed to load ${url}`));
+          document.head.appendChild(script);
+        });
+      }
+
+      async function ensureSdk() {
+        if (window.GazeCloudAPI || typeof window.StartGazeFlow === "function") {
+          setSdkState(true);
+          return true;
+        }
+        // Try local cached copy first (same directory as this HTML file),
+        // then fall back to CDN. Local copy avoids CDN dependency.
+        const localUrl = "./GazeCloudAPI.js";
+        const urls = [localUrl, "https://api.gazerecorder.com/GazeCloudAPI.js", "https://app.gazerecorder.com/GazeCloudAPI.js"];
+        for (const url of urls) {
+          try {
+            await loadSdk(url);
+            if (window.GazeCloudAPI || typeof window.StartGazeFlow === "function") { setSdkState(true); return true; }
+          } catch (err) {}
+        }
+        setSdkState(false);
+        // Notify Python that SDK failed to load
+        sendSample({
+          tracker_id: trackerId, session_id: sessionId,
+          timestamp_ms: Date.now(), event: "sdk_load_failed",
+          x_norm: null, y_norm: null, confidence: 0.0, validity: 1,
+        });
+        return false;
+      }
+
+      function ensureSdkOnce() {
+        if (!sdkEnsurePromise) {
+          sdkEnsurePromise = ensureSdk().then((ok) => { if (ok) installGazeHooks(); return ok; });
+        }
+        return sdkEnsurePromise;
+      }
+
+      // Start the SDK, using port 443 (standard WSS, never firewall-blocked) for the
+      // GazeFlow server. Fetches the region-specific server URL first, then calls
+      // StartEyeTracking with that URL and port 443.
+      function startGazeDirect() {
+        const api = window.GazeCloudAPI;
+        if (!api) return false;
+        const hasFn = typeof api.StartEyeTracking === "function" || typeof api.Start === "function";
+        if (!hasFn) return false;
+
+        gazeStarted = true;
+        startIssuedAt = Date.now();
+        _calibStartMs = Date.now(); // for cached-model detection
+        _showCalibUsed = false;
+        // api.StartEyeTracking always calls the SDK's internal StartGazeFlow which
+        // shows the calibration wizard on a fresh page load. Treat this the same as
+        // our startGazeFlow() path so Python waits for OnCalibrationComplete.
+        internalFlowUsed = true;
+        markInternalCalibration();
+
+        (async () => {
+          let serverUrl = "";
+          try {
+            const resp = await fetch("https://api.gazerecorder.com/GetCloudAdress/", { cache: "no-store" });
+            const info = await resp.json();
+            if (info && info.adress && !info.err) serverUrl = info.adress;
+          } catch (e) {}
+
+          if (typeof api.StartEyeTracking === "function") {
+            // Port 443 = standard WSS, bypasses firewall blocks on ports 43334-43336
+            api.StartEyeTracking(serverUrl || "wss://cloud.gazerecorder.com:", 443);
+          } else {
+            api.Start();
+          }
+          installGazeHooks();
+          startPolling();
+        })();
+
+        // Safety net: if the ShowCalibration wizard never completes in time,
+        // signal Python before its 120s timeout expires.
+        setTimeout(() => {
+          if (!sdkCalibSent) {
+            console.log("[bridge] GazeRecorder wizard timeout — forcing sendSdkCalibrated");
+            if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+            _showCalibForceAccept = true;
+            sendSdkCalibrated();
+          }
+        }, 110_000);
+
+        return true;
+      }
+
+      function startGazeFlow() {
+        if (typeof window.StartGazeFlow === "function") {
+          internalFlowUsed = true;
+          _calibStartMs = Date.now(); // for cached-model detection (same as startGazeDirect)
+          window.StartGazeFlow();
+          autoClickStartCalibration();
+          gazeStarted = true; startIssuedAt = Date.now();
+          installGazeHooks(); startPolling(); markInternalCalibration();
+          setTimeout(() => {
+            if (!sdkCalibSent) {
+              console.log("[bridge] GazeRecorder wizard timeout — forcing sendSdkCalibrated");
+              if (_showCalibObserver) { _showCalibObserver.disconnect(); _showCalibObserver = null; }
+              _showCalibForceAccept = true;
+              sendSdkCalibrated();
+            }
+          }, 110_000);
+          return true;
+        }
+        return false;
+      }
+
+      function startGaze(useFlowFirst = false) {
+        if (gazeStarted) return true;
+        try {
+          if (useFlowFirst || useGazeFlow || enableInternalCalibration) {
+            if (startGazeFlow()) return true;
+            if (startGazeDirect()) return true;
+          } else {
+            if (startGazeDirect()) return true;
+            if (startGazeFlow()) return true;
+          }
+        } catch (err) { console.log("[bridge] start failed", err); }
+        return false;
+      }
+
+      function startGazeWithRetry() {
+        if (gazeStarted) {
+          if (lastSampleAt === 0 && startIssuedAt && Date.now() - startIssuedAt > 2000) {
+            gazeStarted = false;
+            startFailures += 1;
+            if (startFailures >= 2) forceFlow = true;
+          } else { return; }
+        }
+        const ok = startGaze(forceFlow);
+        if (ok) return;
+        if (!(autoStart || allowRetry)) return;
+        if (autoStartTimer) return;
+        autoStartTimer = setTimeout(() => { autoStartTimer = null; startGazeWithRetry(); }, 1000);
+      }
+
+      function stopGaze() {
+        try {
+          if (typeof window.StopGazeFlow === "function") { window.StopGazeFlow(); return true; }
+          if (window.GazeCloudAPI && typeof window.GazeCloudAPI.StopEyeTracking === "function") { window.GazeCloudAPI.StopEyeTracking(); return true; }
+          if (window.GazeCloudAPI && typeof window.GazeCloudAPI.Stop === "function") { window.GazeCloudAPI.Stop(); return true; }
+        } catch (err) { console.log("[bridge] stop failed", err); }
+        return false;
+      }
+
+      document.getElementById("btnStart").onclick = () => { allowRetry = true; startGazeWithRetry(); };
+      document.getElementById("btnStop").onclick = () => stopGaze();
+      document.getElementById("fsHintBtn").onclick = () => tryFullscreen();
+      document.addEventListener("fullscreenchange", () => {
+        if (document.fullscreenElement) {
+          const hint = document.getElementById("fsHint");
+          if (hint) hint.style.display = "none";
+        }
+      });
+
+      connectWs();
+      ensureSdkOnce().then((ok) => {
+        if (ok && autoStart) startGazeWithRetry();
+        // Attempt auto-fullscreen after SDK init (camera permission acts as user gesture).
+        setTimeout(() => tryFullscreen(), 500);
+      });
+    })();
+  </script>
+</body>
+</html>

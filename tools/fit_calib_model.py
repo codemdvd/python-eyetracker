@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Offline fitter for poly2 calibration models based on logged CSVs.
+Offline fitter for polynomial calibration models based on logged CSVs.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def _find_latest_csv(in_path: Path) -> Path | None:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Fit poly2 calibration model from logs")
+    ap = argparse.ArgumentParser(description="Fit a polynomial calibration model from logs")
     ap.add_argument("--csv", type=Path, default=None, help="Path to a specific CSV log")
     ap.add_argument("--in_path", type=Path, default=Path("runs"), help="Directory with CSV logs")
     ap.add_argument("--out", type=Path, default=Path("models/calib_model.json"), help="Output path for model JSON")

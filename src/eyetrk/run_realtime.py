@@ -8,7 +8,7 @@ import time
 import uuid
 
 from eyetrk.adapters.mpiris import MpirisAdapter
-from eyetrk.core.types import CalibModel, Sample
+from eyetrk.core.types import SAMPLE_CSV_FIELDS, CalibModel, Sample, sample_to_csv_row
 
 
 def load_model(path: str) -> CalibModel | None:
@@ -32,11 +32,15 @@ def main():
             "camera_index": 0,
             "width": 1280,
             "height": 720,
-            "head_comp": True,
+            "flip_x": False,
+            "flip_y": False,
+            "head_comp": False,
             "min_conf": 0.7,
             "max_jump_norm": 0.12,
             "gain_x": 1.2,
             "gain_y": 1.0,
+            "auto_gain": False,
+            "cam_unmirror": True,
         }
     )
 
@@ -47,29 +51,12 @@ def main():
     else:
         print("[run_realtime] no calib model, x_px/y_px will stay normalized")
 
-    fieldnames = [
-        "session_id",
-        "tracker_id",
-        "timestamp_ms",
-        "frame_id",
-        "x_px",
-        "y_px",
-        "x_norm",
-        "y_norm",
-        "confidence",
-        "validity",
-        "stim_id",
-        "event",
-        "task_name",
-        "target_x_px",
-        "target_y_px",
-    ]
     f = open(csv_path, "w", newline="", encoding="utf-8")
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer = csv.DictWriter(f, fieldnames=SAMPLE_CSV_FIELDS)
     writer.writeheader()
 
     def on_sample(sample: Sample):
-        writer.writerow(sample.model_dump())
+        writer.writerow(sample_to_csv_row(sample))
 
     adapter.start_stream(on_sample, session_id=session_id)
     print(f"[run_realtime] logging to {csv_path} | session_id={session_id}")

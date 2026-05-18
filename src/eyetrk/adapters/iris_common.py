@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 
 
@@ -115,3 +116,72 @@ def head_center(lm, indices: Sequence[int] = (33, 133, 362, 263, 1)) -> tuple[Op
     if not xs:
         return None, None
     return float(np.mean(xs)), float(np.mean(ys))
+
+
+# ---- 3D head pose via solvePnP -----------------------------------------
+#
+# Generic 3D face model (nose tip at origin, mm scale).
+# Coordinates: +x = right in image (after cam un-mirror), +y = up, +z = toward camera.
+# Landmark correspondence (MediaPipe Face Mesh, un-mirrored frame):
+#   lm[1]   nose tip
+#   lm[152] chin
+#   lm[33]  right eye outer corner  (right side of un-mirrored image)
+#   lm[263] left eye outer corner   (left side of un-mirrored image)
+#   lm[61]  right mouth corner
+#   lm[291] left mouth corner
+_FACE_3D_PNP = np.array([
+    [  0.0,   0.0,   0.0],
+    [  0.0, -63.6, -12.5],
+    [ 43.3,  32.7, -26.0],
+    [-43.3,  32.7, -26.0],
+    [ 28.9, -28.9, -24.1],
+    [-28.9, -28.9, -24.1],
+], dtype=np.float64)
+_PNP_LM = [1, 152, 33, 263, 61, 291]
+
+
+def estimate_head_pose_pnp(
+    lm, img_w: int, img_h: int
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Return (R 3×3, tvec) from solvePnP with an approximate camera model, or (None, None)."""
+    try:
+        pts_2d = np.array(
+            [[lm[i].x * img_w, lm[i].y * img_h] for i in _PNP_LM], dtype=np.float64
+        )
+        f = float(img_w)
+        K = np.array([[f, 0.0, img_w * 0.5], [0.0, f, img_h * 0.5], [0.0, 0.0, 1.0]])
+        ok, rvec, tvec = cv2.solvePnP(
+            _FACE_3D_PNP, pts_2d, K, np.zeros((4, 1)), flags=cv2.SOLVEPNP_ITERATIVE
+        )
+        if not ok:
+            return None, None
+        R, _ = cv2.Rodrigues(rvec)
+        return R, tvec
+    except Exception:
+        return None, None
+
+
+def iris_gaze_hf(
+    lm, R: np.ndarray, img_w: int, img_h: int
+) -> tuple[Optional[float], Optional[float]]:
+    """
+    Head-frame gaze direction from the average of both iris landmarks (468, 473).
+
+    Projects the iris midpoint as a ray in camera frame, then un-rotates by R.T
+    to get the gaze direction in head frame — rotation-invariant by construction.
+    Returns (gaze_x, gaze_y) clamped to [-1, 1], or (None, None) on failure.
+    """
+    try:
+        ix = ((lm[468].x + lm[473].x) * 0.5) * img_w
+        iy = ((lm[468].y + lm[473].y) * 0.5) * img_h
+        f = float(img_w)
+        d_cam = np.array([(ix - img_w * 0.5) / f, (iy - img_h * 0.5) / f, 1.0])
+        d_cam /= np.linalg.norm(d_cam)
+        d_head = R.T @ d_cam
+        if abs(d_head[2]) < 1e-6:
+            return None, None
+        gx = float(d_head[0] / d_head[2])
+        gy = float(-d_head[1] / d_head[2])
+        return float(max(-1.0, min(1.0, gx))), float(max(-1.0, min(1.0, gy)))
+    except Exception:
+        return None, None

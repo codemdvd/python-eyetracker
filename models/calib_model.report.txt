@@ -1,31 +1,38 @@
-CSV: runs\c0e8bda4-6e1d-458a-ac85-46f6ee3919ec\samples_mpiris.csv
+CSV: runs\655784f1-be22-406e-a295-a3ccbc8087d0_native-mpiris_calib\samples_mpiris.csv
 {
-  "r2_x": 0.8410975247638157,
-  "r2_y": 0.2757225188652943,
-  "rmse_px": 379.95326360742047,
-  "mae_px": 340.5157924926126,
-  "n_samples": 1018,
-  "n_raw_samples": 1179,
-  "per_stim_median": false
+  "r2_x": 0.974424966250413,
+  "r2_y": 0.9650800520250088,
+  "rmse_px": 110.40664867240574,
+  "mae_px": 97.82091930289721,
+  "n_samples": 9,
+  "n_raw_samples": 820,
+  "n_points": 9,
+  "per_stim_median": true,
+  "input_features": [
+    "iris_from_head_x_norm",
+    "iris_from_head_y_norm"
+  ],
+  "selected_degree": 1,
+  "ridge_alpha_x": 1e-06,
+  "ridge_alpha_y": 1e-06,
+  "selection_cv_mae_px": 156.24202340689905,
+  "selection_train_mae_px": 97.82091930289721,
+  "selection_mode": "calibration-only",
+  "robust_point_fit": true,
+  "trimmed_raw_samples": 135,
+  "kept_raw_samples": 266,
+  "mean_point_dispersion_px": 16.14518537252652,
+  "max_point_dispersion_px": 27.848320853365777
 }
 
 Per-stim error (px):
-      stim_key  count       mean     median         max
-      calib_01      9 469.346658 474.026777  607.519744
-calib_01_retry     58 368.732124 344.417276  754.445998
-      calib_02     59 397.802127 340.220169  746.693346
-calib_02_retry     60 297.180648 299.020023  334.216926
-      calib_03     59 447.062432 341.231305 1313.070778
-calib_03_retry     60 242.873876 242.976879  266.098910
-      calib_04     58 330.861990 323.804115  629.009924
-calib_04_retry     60 392.566733 388.740287  440.572010
-      calib_05     60 462.704763 366.485848 1214.712118
-calib_05_retry     60 407.512760 465.978140  509.206680
-      calib_06     59 466.287928 439.202929  632.657663
-calib_06_retry     60 416.377878 417.337345  421.563178
-      calib_07     59 228.100574 164.489189  584.868754
-calib_07_retry     60 168.384411 168.119412  176.091297
-      calib_08     59 464.165825 402.762276  791.267964
-calib_08_retry     59 211.597376 161.917708  398.240370
-      calib_09     60 267.256779 237.351308  764.629857
-calib_09_retry     59 201.136743 201.649306  215.768112
+stim_key  count       mean     median        max
+calib_01      1  55.503500  55.503500  55.503500
+calib_02      1  53.892668  53.892668  53.892668
+calib_03      1 131.286708 131.286708 131.286708
+calib_04      1 192.408690 192.408690 192.408690
+calib_05      1 117.139187 117.139187 117.139187
+calib_06      1 147.951136 147.951136 147.951136
+calib_07      1  31.959005  31.959005  31.959005
+calib_08      1 102.914403 102.914403 102.914403
+calib_09      1  47.332976  47.332976  47.332976

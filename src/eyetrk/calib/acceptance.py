@@ -1,4 +1,3 @@
-# calib/acceptance.py
 from __future__ import annotations
 from typing import Iterable, Optional
 import math
@@ -9,11 +8,11 @@ def acceptance(
     *,
     screen_w_px: int,
     screen_h_px: int,
-    min_valid_ms: int = 800,        # было 600
+    min_valid_ms: int = 800,        # tightened from 600
     max_disp_px: float = 40.0,
-    min_valid_rate: float = 0.80,   # было 0.70
-    target_xy_px: Optional[tuple[float,float]] = None,
-    max_offset_px: float = 80.0,    # новый критерий
+    min_valid_rate: float = 0.80,   # tightened from 0.70
+    target_xy_px: Optional[tuple[float, float]] = None,
+    max_offset_px: float = 80.0,    # target proximity threshold
 ) -> bool:
     samples = list(samples)
     if not samples:
@@ -47,14 +46,14 @@ def acceptance(
     sq = [(c[0] - cx) ** 2 + (c[1] - cy) ** 2 for c in coords]
     rms_sd = math.sqrt(sum(sq) / len(sq))
 
-    # новый критерий: близость к целевой точке
+    # Additional criterion: stay close to the target point.
     offset_ok = True
     if target_xy_px is not None:
         tx, ty = target_xy_px
         dx = cx - tx
         dy = cy - ty
         offset = math.hypot(dx, dy)
-        offset_ok = (offset <= max_offset_px)
+        offset_ok = offset <= max_offset_px
 
     valid_rate = len(valid) / len(samples)
 

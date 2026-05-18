@@ -1,2 +1,29 @@
 .venv
 .venv311
+
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local runtime outputs
+runs/
+data/models/
+
+# Locally exported calibration models
+models/*.json
+models/*.report.txt
+
+# Browser profiles created by _open_browser_url (separate Chrome instances per tracker)
+.eyetrk-browser-profile*/
+
+# Daheng camera SDK (vendor, install separately)
+gxipy/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

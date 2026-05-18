@@ -1,6 +1,6 @@
 # python-eyetracker
 
-Unified calibration + benchmarking pipeline for WebGazer, TurkerGaze, Pupil Labs Core, Optimeyes, and Mpiris (webcam + MediaPipe iris).
+Unified calibration + benchmarking pipeline for WebGazer, GazeRecorder, Optimeyes, and Mpiris (webcam + MediaPipe iris).
 
 
 ## 1. Installation
@@ -11,32 +11,47 @@ pip install -e .
 ```
 
 ## 2. Optional web bridge
-Required only for browser trackers (WebGazer / TurkerGaze).
+Required only for browser trackers (WebGazer / GazeRecorder).
 ```bash
 uvicorn eyetrk.web_bridge.server:app --reload
 ```
+If you use multiple web trackers at once, the CLI prints URLs for each tracker page; open each in a browser tab.
+
+## 2b. GUI
+Desktop control panel with tracker/task selection, parameter fields, run buttons, standalone bridge controls, and a report table.
+```bash
+eyetrack-gui
+```
+The GUI wraps the same scenarios as the CLI: `calibrate`, `quickstart`, `run-tasks`, plus report viewing. For `run-tasks` with browser trackers, set a fixed `session_id`, start the bridge in the GUI, open the tracker page, and then launch the task run.
+The `Models` tab shows current calibration and transfer models, their status, key metrics, and source CSVs. It also lets you build transfer models from a calibration session plus a task session without using the terminal.
 
 ## 3. Calibration
 Runs the on-screen 9-point protocol, fits per-tracker models, and stores raw samples under `runs/<session_id>/`.
 ```bash
 eyetrack calibrate -t mpiris                               # single tracker
 eyetrack calibrate -t mpiris --fullscreen                  # same, but stimulus window covers whole display
-eyetrack calibrate --trackers mpiris pupilcore optimeyes
+eyetrack calibrate --trackers mpiris optimeyes
 eyetrack calibrate -t mpiris --dwell-ms 1500 --preview     # longer dwell, webcam preview
+eyetrack calibrate -t webgazer --start-bridge --bridge-open-browser --fullscreen
+eyetrack calibrate -t gazerecorder --start-bridge --bridge-open-browser --fullscreen
+
 ```
 If `models/<tracker>.json` (or legacy `models/calib_model.json` for Mpiris) exists it is injected automatically. After each calibration run the freshly fitted model plus a `.report.txt` with diagnostics are copied to `models/<tracker>.json` / `models/<tracker>.report.txt` (and `models/calib_model.*` for compatibility).
+
+Calibration commands use `models/<tracker>.json`. Task and replay commands prefer `models/<tracker>.transfer.json` when available. Benchmark tasks additionally apply online benchmark-time recalibration for the controlled task protocol.
 
 ## 3b. Quickstart (calibration + tasks in one go)
 Run a full pass (calibration first, then tasks with the fitted models) with a single command:
 ```bash
-eyetrack quickstart -t mpiris pupilcore --tasks fixation-grid step-saccades smooth-pursuit
+eyetrack quickstart -t mpiris optimeyes --tasks fixation-grid step-saccades smooth-pursuit
+eyetrack quickstart -t gazerecorder --start-bridge --bridge-open-browser
 ```
 
 ## 4. Benchmark task suite
 Shows three canonical tasks (fixation grid, step saccades, smooth pursuit) and logs gaze responses aligned with target coordinates.
 ```bash
 eyetrack run-tasks -t mpiris
-eyetrack run-tasks --trackers mpiris pupilcore --tasks fixation-grid smooth-pursuit
+eyetrack run-tasks --trackers mpiris optimeyes --tasks fixation-grid smooth-pursuit
 ```
 
 ## 5. Metrics / reporting
@@ -45,6 +60,14 @@ Reads the recorded sessions and prints MAE, precision RMS, and drop-rate per tas
 eyetrack report --runs runs                  # latest sessions
 eyetrack report --session <uuid> --tracker mpiris
 ```
+
+## 5b. Build transfer models from paired sessions
+Use one calibration session plus one task session to build the task-oriented transfer model:
+```bash
+eyetrack optimize-session-pair --calib-session <calib_session> --task-session <task_session> -t mpiris
+eyetrack optimize-session-pair --calib-session <calib_session> --task-session <task_session> -t optimeyes
+```
+This writes `models/<tracker>.transfer.json` and `models/<tracker>.transfer.report.txt`.
 
 ## 6. Re-fitting a calibration model offline
 Use any `runs/<session>/samples_<tracker>.csv` (containing stim IDs or task targets) to generate a new poly2 model.

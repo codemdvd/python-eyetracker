@@ -1,4 +1,6 @@
 
+import os
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame, time
 class StimEngine:
     def __init__(self, width=1280, height=720, marker_px=14):

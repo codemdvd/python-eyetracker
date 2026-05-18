@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 eyetrack = "eyetrk.cli:main"
+eyetrack-gui = "eyetrk.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

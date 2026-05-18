@@ -1,85 +1,593 @@
-<!-- tools/webgazer_bridge.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WebGazer bridge</title>
-  <script src="webgazer.js"></script>
+  <script src="webgazer.js" defer></script>
+  <style>
+    body { font-family: "Segoe UI", Tahoma, sans-serif; margin: 16px; }
+    .row { margin-bottom: 8px; }
+    .mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+    .badge { padding: 2px 8px; border-radius: 10px; background: #eee; display: inline-block; }
+    .ok { background: #d1fae5; }
+    .warn { background: #fee2e2; }
+    #fsHint { background: #fef9c3; border: 1px solid #ca8a04; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+    #fsHint button { margin-left: 12px; padding: 4px 10px; cursor: pointer; }
+
+    /* Stimulus overlay — shown fullscreen during calibration and tasks */
+    #calibOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #ffffff;
+      z-index: 9000;
+    }
+    /* Task dot — blue, smaller, no click needed */
+    #taskDot {
+      display: none;
+      position: fixed;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #2563eb;
+      transform: translate(-50%, -50%);
+      z-index: 9003;
+      pointer-events: none;
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #2563eb;
+    }
+    /* Saccade: instant jump (no transition). Pursuit: smooth move. */
+    #taskDot.smooth { transition: left 0.08s linear, top 0.08s linear; }
+    @keyframes taskPulse {
+      0%   { transform: translate(-50%, -50%) scale(2); opacity: 0.3; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+    #taskDot.pulse { animation: taskPulse 0.2s ease-out forwards; }
+    #calibInstruction {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 15px;
+      font-family: "Segoe UI", sans-serif;
+      z-index: 9002;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    /* Outer ring — subtle glow */
+    #calibRing {
+      position: fixed;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: rgba(220, 38, 38, 0.18);
+      transform: translate(-50%, -50%);
+      z-index: 9001;
+      pointer-events: none;
+      transition: left 0.12s ease, top 0.12s ease;
+    }
+    /* Inner dot — sharp target */
+    #calibDot {
+      position: fixed;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #dc2626;
+      transform: translate(-50%, -50%);
+      z-index: 9002;
+      cursor: pointer;
+      transition: left 0.12s ease, top 0.12s ease;
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #dc2626;
+    }
+    /* Pulse animation when a new stim appears */
+    @keyframes dotPulse {
+      0%   { transform: translate(-50%, -50%) scale(1.8); opacity: 0.4; }
+      100% { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
+    }
+    #calibDot.pulse { animation: dotPulse 0.25s ease-out forwards; }
+
+    /* Progress indicator */
+    #calibProgress {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 9002;
+      pointer-events: none;
+    }
+    .prog-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ccc;
+      transition: background 0.2s;
+    }
+    .prog-dot.done { background: #16a34a; }
+    .prog-dot.active { background: #dc2626; }
+  </style>
 </head>
 <body>
+  <div id="fsHint">
+    For best accuracy, go <strong>fullscreen</strong> before calibration starts.
+    <button onclick="document.documentElement.requestFullscreen().catch(()=>{}); document.getElementById('fsHint').style.display='none'">Go fullscreen</button>
+    <button onclick="document.getElementById('fsHint').style.display='none'" style="background:#eee">Dismiss</button>
+  </div>
   <h1>WebGazer bridge</h1>
-  <p id="status">Connecting...</p>
+  <div class="row">WS: <span id="wsState" class="badge warn">disconnected</span></div>
+  <div class="row">Session: <span id="sessionId" class="mono">(none)</span></div>
+  <div class="row">Tracker: <span id="trackerId" class="mono">webgazer</span></div>
+  <div class="row">Last stim: <span id="stimState" class="mono">(none)</span></div>
+  <div class="row">Samples: <span id="sampleCount" class="mono">0</span></div>
+  <div class="row">WebGazer: <span id="wgState" class="badge warn">starting</span></div>
+
+  <!-- Calibration overlay (shown fullscreen while calib stims are active) -->
+  <div id="calibOverlay">
+    <div id="calibInstruction">Look at the red dot and click it</div>
+    <div id="calibRing"></div>
+    <div id="calibDot" title="Click to register gaze"></div>
+    <div id="calibProgress"></div>
+  </div>
+  <!-- Task dot (shown fullscreen during benchmark tasks) -->
+  <div id="taskOverlay" style="display:none;position:fixed;inset:0;background:#fff;z-index:8999;"></div>
+  <div id="taskDot"></div>
 
   <script>
-    // достаём параметры из URL
-    const params = new URLSearchParams(window.location.search);
-    const trackerId = params.get("tracker_id") || "webgazer";
-    const wsPort = params.get("ws_port") || "8000";
-    const sessionId = params.get("session_id") || "";
+    (() => {
+      // Maximise the app window on load (works in Chrome --app mode and popups).
+      try { window.moveTo(0, 0); window.resizeTo(screen.availWidth, screen.availHeight); } catch(e) {}
 
-    // создаём WS к Python
-    const ws = new WebSocket(`ws://localhost:${wsPort}/ws/${trackerId}`);
+      const params = new URLSearchParams(window.location.search);
+      const trackerId = params.get("tracker_id") || "webgazer";
+      const wsPort = params.get("ws_port") || "8000";
+      let sessionId = params.get("session_id") || "";
+      const wsHostParam = params.get("ws_host");
+      const autoStart = params.get("auto_start") !== "0";
+      const screenWParam = Number(params.get("screen_w"));
+      const screenHParam = Number(params.get("screen_h"));
 
-    ws.onopen = () => {
-      document.getElementById("status").textContent = "WS connected";
-      console.log("[bridge] WS connected");
-    };
-
-    ws.onclose = () => {
-      document.getElementById("status").textContent = "WS closed";
-      console.log("[bridge] WS closed");
-    };
-
-    ws.onerror = (e) => {
-      console.log("[bridge] WS error", e);
-    };
-
-    // СЮДА ПРИЛЕТАЮТ СОБЫТИЯ ОТ ORCHESTRATOR (calib_point_start, ...)
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        console.log("[bridge] incoming event:", msg);
-
-        if (msg.type === "calib_point_start") {
-          const p = msg.payload || {};
-          // p.id, p.x_norm, p.y_norm, p.t
-          console.log("[bridge] calib_point_start", p.id, p.x_norm, p.y_norm);
-          // здесь можно:
-          //  - подсветить overlay в браузере
-          //  - начать собирать данные webgazer для этого стимула
-        } else if (msg.type === "calib_point_end") {
-          console.log("[bridge] calib_point_end", msg.payload?.id);
-          // здесь можно остановить сбор данных для стимула
-        }
-        // аналогично можно обрабатывать stim_on/stim_off/task_start/task_end
-      } catch (e) {
-        console.log("[bridge] failed to parse incoming msg", e);
+      function getScaleW() {
+        if (Number.isFinite(screenWParam) && screenWParam > 0) return screenWParam;
+        if (window.screen && window.screen.width > 0) return window.screen.width;
+        return window.innerWidth || 1;
       }
-    };
+      function getScaleH() {
+        if (Number.isFinite(screenHParam) && screenHParam > 0) return screenHParam;
+        if (window.screen && window.screen.height > 0) return window.screen.height;
+        return window.innerHeight || 1;
+      }
 
-    // Стартуем webgazer и шлём данные в Python
-    webgazer.setGazeListener(function (data, elapsedTime) {
-      if (!data) return;
-      const now = Date.now();
-      const sample = {
-        tracker_id: trackerId,
-        session_id: sessionId,
-        timestamp_ms: now,
-        x_norm: data.x / window.innerWidth,
-        y_norm: data.y / window.innerHeight,
-        confidence: 1.0,
-        validity: 0,
-        stim_id: null,
-        event: "stream",
+      document.getElementById("trackerId").textContent = trackerId;
+      document.getElementById("sessionId").textContent = sessionId || "(none)";
+
+      const wsState = document.getElementById("wsState");
+      const stimState = document.getElementById("stimState");
+      const sampleCountEl = document.getElementById("sampleCount");
+      const wgState = document.getElementById("wgState");
+
+      // Calibration overlay elements
+      const calibOverlay = document.getElementById("calibOverlay");
+      const calibDot = document.getElementById("calibDot");
+      const calibRing = document.getElementById("calibRing");
+      const calibInstruction = document.getElementById("calibInstruction");
+      const calibProgress = document.getElementById("calibProgress");
+      // Task overlay elements
+      const taskOverlay = document.getElementById("taskOverlay");
+      const taskDot = document.getElementById("taskDot");
+
+      let ws = null;
+      let reconnectTimer = null;
+      const reconnectDelayMs = 500;
+      const wsHosts = Array.from(
+        new Set(
+          [wsHostParam, window.location.hostname, "127.0.0.1", "localhost"].filter(Boolean)
+        )
+      );
+      let wsHostIdx = 0;
+      let wsFailures = 0;
+      let wgStarted = false;
+      let inTaskPhase = false;
+
+      const state = {
+        stim: null,
+        samples: 0,
+        calibStimsSeen: new Set(),
+        lastCalibStimId: null,
+        lastTaskStimId: null,
       };
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(sample));
-      }
-    }).begin();
 
-    // по желанию:
-    // webgazer.showVideoPreview(true).showPredictionPoints(true);
+      // ---- Calibration overlay ----
+
+      function showCalibDot(xPx, yPx, stimId) {
+        calibOverlay.style.display = "block";
+
+        // Scale from Python screen coords to browser viewport coords.
+        // If browser is fullscreen (recommended), these are equal.
+        const scaleW = getScaleW();
+        const scaleH = getScaleH();
+        const bx = (xPx / scaleW) * window.innerWidth;
+        const by = (yPx / scaleH) * window.innerHeight;
+
+        calibDot.style.left = bx + "px";
+        calibDot.style.top  = by + "px";
+        calibRing.style.left = bx + "px";
+        calibRing.style.top  = by + "px";
+
+        // Pulse when stim changes
+        if (stimId !== state.lastCalibStimId) {
+          calibDot.classList.remove("pulse");
+          void calibDot.offsetWidth; // reflow to restart animation
+          calibDot.classList.add("pulse");
+          state.lastCalibStimId = stimId;
+          state.calibStimsSeen.add(_baseStimId(stimId));
+          updateCalibProgress();
+        }
+      }
+
+      function hideCalibDot() {
+        calibOverlay.style.display = "none";
+        state.lastCalibStimId = null;
+      }
+
+      function showTaskDot(xPx, yPx, stimId) {
+        const scaleW = getScaleW();
+        const scaleH = getScaleH();
+        const bx = (xPx / scaleW) * window.innerWidth;
+        const by = (yPx / scaleH) * window.innerHeight;
+
+        // Smooth transition for pursuit; instant for fixation/saccades.
+        const isPursuit = typeof stimId === "string" && stimId.startsWith("pursuit");
+        taskDot.classList.remove("smooth", "pulse");
+        void taskDot.offsetWidth;
+        if (isPursuit) taskDot.classList.add("smooth");
+
+        taskDot.style.left = bx + "px";
+        taskDot.style.top  = by + "px";
+        taskDot.style.display = "block";
+        taskOverlay.style.display = "block";
+
+        // Pulse only on stim change (not every move update)
+        if (stimId !== state.lastTaskStimId) {
+          taskDot.classList.add("pulse");
+          state.lastTaskStimId = stimId;
+        }
+      }
+
+      function hideTaskDot() {
+        taskDot.style.display = "none";
+        taskOverlay.style.display = "none";
+        state.lastTaskStimId = null;
+      }
+
+      function updateCalibProgress() {
+        const total = 9;
+        calibProgress.innerHTML = "";
+        for (let i = 0; i < total; i++) {
+          const d = document.createElement("div");
+          const key = "calib_" + String(i + 1).padStart(2, "0");
+          if (state.calibStimsSeen.has(key)) {
+            d.className = "prog-dot done";
+          } else {
+            d.className = "prog-dot";
+          }
+          calibProgress.appendChild(d);
+        }
+      }
+
+      // Click on dot = strong training signal
+      calibDot.addEventListener("click", () => {
+        if (state.stim && state.stim.train && window.webgazer &&
+            typeof window.webgazer.recordScreenPosition === "function") {
+          const { x_px, y_px } = state.stim;
+          if (Number.isFinite(x_px) && Number.isFinite(y_px)) {
+            // Record 3× on click for a stronger training signal
+            for (let i = 0; i < 3; i++) {
+              try { window.webgazer.recordScreenPosition(x_px, y_px, "click"); } catch (e) {}
+            }
+          }
+        }
+      });
+
+      // ---- Helpers ----
+
+      function _baseStimId(stimId) {
+        if (!stimId) return "";
+        return String(stimId).replace(/_retry\d*$/, "");
+      }
+
+      function setWsState(ok) {
+        wsState.textContent = ok ? "connected" : "disconnected";
+        wsState.className = `badge ${ok ? "ok" : "warn"}`;
+      }
+
+      function currentWsHost() {
+        return wsHosts[Math.max(0, Math.min(wsHostIdx, wsHosts.length - 1))] || "localhost";
+      }
+      function noteWsFailure() {
+        wsFailures += 1;
+        if (wsFailures % 3 === 0 && wsHosts.length > 1) {
+          wsHostIdx = (wsHostIdx + 1) % wsHosts.length;
+        }
+      }
+      function scheduleReconnect() {
+        if (reconnectTimer) return;
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs(); }, reconnectDelayMs);
+      }
+
+      // ---- WebSocket ----
+
+      function connectWs() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+        try { if (ws) ws.close(); } catch (err) {}
+        const host = currentWsHost();
+        ws = new WebSocket(`ws://${host}:${wsPort}/ws/${trackerId}`);
+        wsState.title = `ws://${host}:${wsPort}`;
+        ws.onopen = () => { wsFailures = 0; setWsState(true); };
+        ws.onclose = () => { setWsState(false); noteWsFailure(); scheduleReconnect(); };
+        ws.onerror = () => { setWsState(false); noteWsFailure(); };
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            const payload = msg && msg.payload ? msg.payload : msg;
+            const msgType = (payload && payload.type) || msg.type;
+
+            if (msgType === "start") {
+              const hint = document.getElementById("fsHint");
+              if (hint) hint.style.display = "none";
+              try { window.focus(); } catch (err) {}
+              if (payload && payload.session_id) {
+                sessionId = String(payload.session_id);
+                document.getElementById("sessionId").textContent = sessionId || "(none)";
+              }
+              const isCalibPhase = !payload || !payload.phase || payload.phase === "calibration";
+              inTaskPhase = !isCalibPhase;
+              state.calibStimsSeen.clear();
+              updateCalibProgress();
+              if (isCalibPhase) {
+                // Reset runtime state but keep the stored model — accumulated
+                // training across sessions significantly improves first-stim predictions.
+                resetWebGazerRuntime().then(() => {
+                  startWebGazer();
+                });
+              } else {
+                // Tasks phase: keep WebGazer running with trained model intact.
+                // Clear state.stim so the prediction loop stops training on the last calib dot.
+                state.stim = null;
+                hideCalibDot();
+                taskOverlay.style.display = "block";
+                if (!wgStarted) startWebGazer();
+              }
+              return;
+            }
+
+            // stim_off: hide the dot; during tasks keep the white overlay to mask the camera feed
+            if (msgType === "stim_off") {
+              hideCalibDot();
+              if (inTaskPhase) {
+                taskDot.style.display = "none";
+                taskDot.classList.remove("smooth", "pulse");
+                state.lastTaskStimId = null;
+              } else {
+                hideTaskDot();
+              }
+              state.stim = null;
+              return;
+            }
+
+            if (!payload || msgType !== "stim") return;
+            if (preTraining) preTraining = false; // cancel warm-up, real calib starts
+            const stimId = payload.stim_id || payload.id || null;
+            const xPx = payload.x_px ?? payload.target_x_px;
+            const yPx = payload.y_px ?? payload.target_y_px;
+            const train = isCalibrationStim(stimId);
+            state.stim = { stim_id: stimId, x_px: xPx, y_px: yPx, train };
+            stimState.textContent = JSON.stringify(state.stim);
+
+            if (!wgStarted) startWebGazer();
+
+            if (train) {
+              hideTaskDot();
+              // Show dot in browser — user looks here, not at the Python window
+              if (Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                showCalibDot(xPx, yPx, stimId);
+              }
+              if (window.webgazer && typeof window.webgazer.recordScreenPosition === "function") {
+                if (Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                  try { window.webgazer.recordScreenPosition(xPx, yPx, "click"); } catch (err) {}
+                }
+              }
+            } else {
+              hideCalibDot();
+              // Show task dot — user follows it during benchmark tasks
+              if (Number.isFinite(xPx) && Number.isFinite(yPx)) {
+                showTaskDot(xPx, yPx, stimId);
+              }
+            }
+          } catch (err) {
+            console.log("[bridge] failed to parse incoming msg", err);
+          }
+        };
+      }
+
+      function sendSample(sample) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(sample));
+        }
+      }
+
+      // ---- WebGazer lifecycle ----
+
+      async function resetWebGazerRuntime() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (trainTimer) { clearInterval(trainTimer); trainTimer = null; }
+        pollBusy = false;
+        state.stim = null;
+        state.samples = 0;
+        sampleCountEl.textContent = "0";
+        hideCalibDot();
+        try {
+          if (window.webgazer && typeof window.webgazer.end === "function") {
+            await window.webgazer.end();
+          }
+        } catch (err) {}
+        wgStarted = false;
+      }
+
+      function updateWgState(ok, text) {
+        wgState.textContent = text || (ok ? "ready" : "not ready");
+        wgState.className = `badge ${ok ? "ok" : "warn"}`;
+      }
+
+      function isFiniteNumber(x) { return Number.isFinite(x); }
+      function isCalibrationStim(stimId) {
+        return typeof stimId === "string" && stimId.startsWith("calib_");
+      }
+
+      function pushSample(xPx, yPx) {
+        if (preTraining) return; // suppress during warm-up so _web_ready_counts stays 0
+        if (!isFiniteNumber(xPx) || !isFiniteNumber(yPx)) return;
+        const sample = {
+          tracker_id: trackerId,
+          session_id: sessionId,
+          timestamp_ms: Date.now(),
+          x_norm: xPx / getScaleW(),
+          y_norm: yPx / getScaleH(),
+          confidence: 1.0,
+          validity: 0,
+          stim_id: state.stim ? state.stim.stim_id : null,
+          target_x_px: state.stim ? state.stim.x_px : null,
+          target_y_px: state.stim ? state.stim.y_px : null,
+          event: state.stim ? (state.stim.train ? "calibration" : "task") : "stream",
+        };
+        state.samples += 1;
+        sampleCountEl.textContent = String(state.samples);
+        sendSample(sample);
+      }
+
+      let preTraining = false;
+      // Pre-training: show 5 dots automatically (runs during GR SDK init wait).
+      // Calling recordScreenPosition with ground-truth positions bootstraps the
+      // WZ model so the first real calibration point is not from a blank slate.
+      // Suppresses pushSample so _web_ready_counts stays 0 until pre-train done.
+      async function preTrainWebGazer() {
+        if (!wgStarted || preTraining) return;
+        preTraining = true;
+        const points = [
+          [0.5, 0.5],
+          [0.15, 0.15], [0.85, 0.15],
+          [0.15, 0.85], [0.85, 0.85],
+        ];
+        calibInstruction.textContent = "Warming up — look at the dot";
+        calibOverlay.style.display = "block";
+        for (const [nx, ny] of points) {
+          if (!preTraining) break;
+          const bx = nx * window.innerWidth;
+          const by = ny * window.innerHeight;
+          calibDot.style.left = bx + "px";
+          calibDot.style.top  = by + "px";
+          calibRing.style.left = bx + "px";
+          calibRing.style.top  = by + "px";
+          calibDot.classList.remove("pulse");
+          void calibDot.offsetWidth;
+          calibDot.classList.add("pulse");
+          const end = Date.now() + 1500;
+          while (Date.now() < end && preTraining) {
+            if (window.webgazer && typeof window.webgazer.recordScreenPosition === "function") {
+              try { window.webgazer.recordScreenPosition(bx, by, "click"); } catch(e) {}
+            }
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
+        preTraining = false;
+        calibOverlay.style.display = "none";
+        calibInstruction.textContent = "Look at the red dot";
+      }
+
+      let pollTimer = null;
+      let pollBusy = false;
+      let trainTimer = null;
+
+      function startTrainingLoop() {
+        if (trainTimer) return;
+        // Fires at 10 Hz independently of prediction rate — gives WZ 10 labelled
+        // training examples per second during calibration stims.
+        trainTimer = setInterval(() => {
+          if (!wgStarted || preTraining) return;
+          if (!state.stim || !state.stim.train) return;
+          if (!window.webgazer || typeof window.webgazer.recordScreenPosition !== "function") return;
+          const { x_px, y_px } = state.stim;
+          if (!isFiniteNumber(x_px) || !isFiniteNumber(y_px)) return;
+          try { window.webgazer.recordScreenPosition(x_px, y_px, "click"); } catch (err) {}
+        }, 100);
+      }
+
+      function startPredictionLoop() {
+        // setGazeListener must be set BEFORE begin() to receive callbacks —
+        // see startWebGazer() where it is registered in the configuration chain.
+        // This function only starts the training loop (prediction is already wired).
+        startTrainingLoop();
+      }
+
+      async function startWebGazer() {
+        if (wgStarted) return;
+        // webgazer.js is loaded with defer — wait up to 10s for it to become available
+        for (let i = 0; i < 100 && (!window.webgazer || typeof window.webgazer.setGazeListener !== "function"); i++) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+        if (!window.webgazer || typeof window.webgazer.setGazeListener !== "function") {
+          console.log("[bridge] webgazer.js not available after 10s wait");
+          updateWgState(false, "webgazer missing");
+          return;
+        }
+        wgStarted = true;
+        // setGazeListener must be called BEFORE begin() — WZ's prediction loop
+        // only delivers callbacks to listeners registered before it starts.
+        window.webgazer
+          .showVideoPreview(true)
+          .showFaceOverlay(true)
+          .showFaceFeedbackBox(true)
+          .showPredictionPoints(false)
+          .applyKalmanFilter(true)
+          .setGazeListener((data) => {
+            if (!data || !isFiniteNumber(data.x) || !isFiniteNumber(data.y)) return;
+            pushSample(data.x, data.y);
+          });
+
+        try {
+          await window.webgazer.begin();
+          if (typeof window.webgazer.setVideoViewerSize === "function") {
+            window.webgazer.setVideoViewerSize(320, 240);
+          }
+          startPredictionLoop(); // starts trainTimer only; listener already registered above
+          if (state.stim && Number.isFinite(state.stim.x_px) && Number.isFinite(state.stim.y_px)) {
+            try { window.webgazer.recordScreenPosition(state.stim.x_px, state.stim.y_px, state.stim.stim_id); } catch (err) {}
+          }
+          updateWgState(true, "ready");
+          // Camera grant counts as a user gesture; attempt fullscreen now.
+          setTimeout(() => {
+            if (!document.fullscreenElement) {
+              document.documentElement.requestFullscreen().catch(() => {});
+            }
+          }, 300);
+          // Bootstrap WZ model before calibration stims start.
+          preTrainWebGazer();
+        } catch (err) {
+          console.log("[bridge] webgazer begin failed", err);
+          updateWgState(false, "camera blocked");
+        }
+      }
+
+      connectWs();
+      updateWgState(false, "waiting for stim");
+      if (autoStart) {
+        startWebGazer();
+      }
+    })();
   </script>
 </body>
 </html>
