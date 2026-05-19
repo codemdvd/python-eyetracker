@@ -173,11 +173,13 @@ class OptimeyesAdapter(Tracker):
         else:
             self._cap = cv2.VideoCapture(self._cam_index)
             try:
+                self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                 self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
                 self._cap.set(cv2.CAP_PROP_FPS, self._fps)
-                self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # DSHOW: 0.75 = auto
-                self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)     # MSMF: 3 = auto
+                self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+                self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
                 pass
         if not self._cap.isOpened():

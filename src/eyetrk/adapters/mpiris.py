@@ -206,14 +206,13 @@ class MpirisAdapter(Tracker):
                 idx = self._cam_index
                 cap = cv2.VideoCapture(idx, backend)
                 try:
+                    cap.set(cv2.CAP_PROP_FOURCC, cast(Any, cv2).VideoWriter_fourcc(*"MJPG"))
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
                     cap.set(cv2.CAP_PROP_FPS, self._target_fps)
-                    cap.set(cv2.CAP_PROP_FOURCC, cast(Any, cv2).VideoWriter_fourcc(*"MJPG"))
-                    # Re-enable auto-exposure: DSHOW resets it on open, causing ~1s flicker.
-                    # 0.75 = auto for DSHOW; MSMF uses 3 — try both, ignore errors.
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception:
                     pass
                 if cap.isOpened():
