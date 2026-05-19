@@ -2,7 +2,7 @@
 #
 # NOTE: mediapipe 0.10.x requires Python 3.11.  Do NOT use 3.12+.
 # Install:
-#   python3.11 -m venv .venv
+#   py -V:3.11 -m venv .venv
 #   .venv\Scripts\activate          # PowerShell: .\.venv\Scripts\Activate.ps1
 #   pip install -r requirements.txt
 #   pip install -e .

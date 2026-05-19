@@ -179,6 +179,15 @@ def calibrate(
     auto_start_ms: int | None = typer.Option(None, help="Auto-start after N ms (skip Space/Enter)"),
     record_video: bool = typer.Option(False, help="Record source camera video for native trackers"),
     camera_source: str = typer.Option("webcam", help="Camera source for native trackers: 'webcam' or 'daheng'"),
+    camera_backend: str = typer.Option(
+        "auto",
+        "--camera-backend",
+        help=(
+            "cv2 backend for native webcam trackers: 'auto' (DSHOW/ANY alternating), "
+            "'dshow' (exclusive, Windows only), 'msmf' (Media Foundation — shares camera "
+            "with browser via Windows Camera Frame Server)."
+        ),
+    ),
 ):
     """Run 9-point calibration for selected trackers.
 
@@ -231,6 +240,7 @@ def calibrate(
     mpiris_cfg["out_width"] = width_px
     mpiris_cfg["out_height"] = height_px
     mpiris_cfg["camera_source"] = camera_source
+    mpiris_cfg["camera_backend"] = camera_backend
 
     opt_cfg = dict(OPTIMEYES_DEFAULT_CFG)
     opt_cfg["out_width"] = width_px

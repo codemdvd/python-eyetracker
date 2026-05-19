@@ -23,7 +23,7 @@ git clone https://github.com/codemdvd/python-eyetracker.git
 cd python-eyetracker
 
 # 2. Create virtualenv with Python 3.11 specifically
-py -3.11 -m venv .venv
+py -V:3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1     # PowerShell
 # or: .venv\Scripts\activate     # CMD
 
