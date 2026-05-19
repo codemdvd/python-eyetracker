@@ -60,7 +60,7 @@ DEFAULT_TRACKERS = ["webgazer", "gazerecorder", "optimeyes", "mpiris"]
 ROOT = Path(__file__).resolve().parents[2]
 MPIRIS_DEFAULT_CFG = {
     "fps": 60.0,
-    "camera_index": 0,
+    "camera_index": 1,
     "camera_source": "webcam",
     "width": 1280,
     "height": 720,

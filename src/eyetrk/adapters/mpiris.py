@@ -235,10 +235,24 @@ class MpirisAdapter(Tracker):
 
         ret_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
         ret_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        ret_fps = cap.get(cv2.CAP_PROP_FPS)
+        fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+        fourcc_str = "".join(chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4))
         if self._video_path:
             print(f"[mpiris] Video source opened ({ret_w:.0f}x{ret_h:.0f}): {self._video_path}")
         else:
-            print(f"[mpiris] Camera opened (index={self._cam_index}, {ret_w:.0f}x{ret_h:.0f})")
+            print(f"[mpiris] Camera opened (index={self._cam_index}, {ret_w:.0f}x{ret_h:.0f} @ {ret_fps:.0f}fps, codec={fourcc_str})")
+            if ret_fps > 0 and ret_fps < 20:
+                print(f"[mpiris] WARNING: camera reports only {ret_fps:.0f}fps — falling back to 640x480")
+                try:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    ret_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    ret_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    ret_fps = cap.get(cv2.CAP_PROP_FPS)
+                    print(f"[mpiris] Fallback resolution: {ret_w:.0f}x{ret_h:.0f} @ {ret_fps:.0f}fps")
+                except Exception:
+                    pass
         source_start_ms = self._video_start_timestamp_ms if self._video_path else int(time.time() * 1000)
 
         frame_id = 0
