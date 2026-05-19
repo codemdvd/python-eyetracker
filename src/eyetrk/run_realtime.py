@@ -29,7 +29,7 @@ def main():
     adapter.initialize(
         {
             "fps": 30,
-            "camera_index": 0,
+            "camera_index": 1,
             "width": 1280,
             "height": 720,
             "flip_x": False,

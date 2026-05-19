@@ -92,7 +92,7 @@ class OptimeyesAdapter(Tracker):
         if not _MP_OK:
             raise RuntimeError("mediapipe is required for optimeyes fallback.")
         self._fps = float(config.get("fps", 30.0))
-        self._cam_index = int(config.get("camera_index", 0))
+        self._cam_index = int(config.get("camera_index", 1))
         self._camera_source = str(config.get("camera_source", self._camera_source))
         self._daheng_index = int(config.get("daheng_device_index", self._daheng_index))
         self._daheng_exposure_us = float(config.get("daheng_exposure_us", self._daheng_exposure_us))
