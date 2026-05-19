@@ -188,6 +188,12 @@ def calibrate(
             "with browser via Windows Camera Frame Server)."
         ),
     ),
+    all_trackers: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Run all 4 trackers (mpiris, optimeyes, webgazer, gazerecorder). Implies --start-bridge --bridge-open-browser.",
+    ),
 ):
     """Run 9-point calibration for selected trackers.
 
@@ -196,6 +202,12 @@ def calibrate(
     Use --record-video to let the second tracker replay from the recorded video
     of the first pass, which is faster and produces more comparable data.
     """
+    if all_trackers:
+        if not trackers:
+            trackers = ["mpiris", "optimeyes", "webgazer", "gazerecorder"]
+        start_bridge = True
+        bridge_open_browser = True
+
     tracker_names = _normalize_tracker_names(trackers)
     if not tracker_names:
         raise typer.BadParameter("No trackers selected.")
@@ -1069,7 +1081,15 @@ def run_tasks(
     wait_ready: bool = typer.Option(False, help="Pause before showing tasks (set up web trackers first)"),
     record_video: bool = typer.Option(False, help="Record source camera video for native trackers"),
     camera_source: str = typer.Option("webcam", help="Camera source for native trackers: 'webcam' or 'daheng'"),
+    camera_backend: str = typer.Option("auto", "--camera-backend", help="cv2 backend for native webcam trackers: 'auto', 'dshow', 'msmf'"),
+    all_trackers: bool = typer.Option(False, "--all", "-a", help="Run all 4 trackers. Implies --start-bridge --bridge-open-browser."),
 ):
+    if all_trackers:
+        if not trackers:
+            trackers = ["mpiris", "optimeyes", "webgazer", "gazerecorder"]
+        start_bridge = True
+        bridge_open_browser = True
+
     tracker_names = _normalize_tracker_names(trackers)
     if not tracker_names:
         raise typer.BadParameter("No trackers selected.")
@@ -1151,6 +1171,7 @@ def run_tasks(
         mpiris_cfg["out_width"] = width_px
         mpiris_cfg["out_height"] = height_px
         mpiris_cfg["camera_source"] = camera_source
+        mpiris_cfg["camera_backend"] = camera_backend
         if record_video:
             mpiris_cfg["record_video_path"] = str(Path("runs") / session_id / "source_camera.mp4")
         cam_idx = mpiris_cfg.get("camera_index", 0)
