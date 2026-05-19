@@ -145,7 +145,18 @@ class StimEngine:
                     cap.set(cv2.CAP_PROP_FPS, 30)
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                    actual_fps = cap.get(cv2.CAP_PROP_FPS)
+                    actual_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                    actual_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                    fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+                    fourcc_str = "".join(chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4))
+                    print(f"[preview] Camera {cam_index}: {actual_w:.0f}x{actual_h:.0f} @ {actual_fps:.0f}fps codec={fourcc_str}")
+                    if 0 < actual_fps < 20:
+                        print("[preview] Low FPS detected — retrying at 640x480")
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        print(f"[preview] Fallback: {cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f}")
             except Exception:
                 cap = None
 
