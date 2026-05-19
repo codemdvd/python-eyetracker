@@ -1192,20 +1192,17 @@ def run_tasks(
             prefer_transfer_model=True,
         )
         orch = Orchestrator(adapters, logger, session_id, session_meta=meta)
-        orch.start_streams()
-        try:
-            orch.run_tasks(
-                task_objs,
-                fullscreen=fullscreen,
-                camera_index=cam_idx,
-                mirror_preview=mirror_preview,
-                cam_unmirror=cam_unmirror,
-                framing_scale=framing_scale,
-                auto_start_ms=auto_start_ms,
-                camera_source=camera_source,
-            )
-        finally:
-            orch.stop_streams()
+        orch.run_tasks(
+            task_objs,
+            fullscreen=fullscreen,
+            camera_index=cam_idx,
+            mirror_preview=mirror_preview,
+            cam_unmirror=cam_unmirror,
+            framing_scale=framing_scale,
+            auto_start_ms=auto_start_ms,
+            camera_source=camera_source,
+            manage_streams=True,
+        )
     finally:
         try:
             if "stop_bridge" in locals() and stop_bridge:

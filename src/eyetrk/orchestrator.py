@@ -366,6 +366,7 @@ class Orchestrator:
         show_ready: bool = True,
         show_head_prompt: bool = True,
         camera_source: str = "webcam",
+        manage_streams: bool = False,
     ):
         """Play benchmark tasks timeline on the stimulus engine."""
         from .stim.engine import StimEngine, StimConfig
@@ -376,6 +377,7 @@ class Orchestrator:
         with self._state_lock:
             self._runtime_dims = (w, h)
 
+        started_streams = False
         try:
             if show_ready and (camera_index is not None or camera_source == "daheng"):
                 ready_msg = (
@@ -393,6 +395,9 @@ class Orchestrator:
                     show_alignment_overlay=True,
                     camera_source=camera_source,
                 )
+            if manage_streams:
+                self.start_streams()
+                started_streams = True
             tasks_payload = {"screen_w": w, "screen_h": h, "t_ms": int(time.time() * 1000)}
             self._broadcast("tasks_start", tasks_payload)
             self._record_event("tasks_start", tasks_payload)
@@ -462,6 +467,8 @@ class Orchestrator:
             done_payload = {"t_ms": int(time.time() * 1000)}
             self._broadcast("tasks_done", done_payload)
             self._record_event("tasks_done", done_payload)
+            if manage_streams and started_streams:
+                self.stop_streams()
             eng.close()
             with self._state_lock:
                 self._active_stim_id = None
