@@ -2,12 +2,41 @@
 
 Unified calibration + benchmarking pipeline for WebGazer, GazeRecorder, Optimeyes, and Mpiris (webcam + MediaPipe iris).
 
+---
 
-## 1. Installation
-```bash
-python -m venv .venv
-.venv\Scripts\activate           # PowerShell: .\.venv\Scripts\Activate.ps1
+## Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| **Python 3.11** | `mediapipe 0.10.x` does not support 3.12+. Use exactly 3.11. |
+| **Windows 10/11** | Camera backend uses `cv2.CAP_DSHOW` (Windows-only). |
+| **Webcam** | Required for `mpiris` and `optimeyes` trackers. |
+| **Chrome or Edge** | Required for `webgazer` and `gazerecorder` trackers. |
+
+---
+
+## 1. Setup on a new machine
+
+```powershell
+# 1. Clone
+git clone https://github.com/codemdvd/python-eyetracker.git
+cd python-eyetracker
+
+# 2. Create virtualenv with Python 3.11 specifically
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1     # PowerShell
+# or: .venv\Scripts\activate     # CMD
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Install the package itself (editable)
 pip install -e .
+```
+
+Verify:
+```powershell
+eyetrack --help
 ```
 
 ## 2. Optional web bridge

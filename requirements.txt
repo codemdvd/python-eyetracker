@@ -1,0 +1,37 @@
+# Runtime dependencies — pinned to versions tested on Python 3.11 / Windows
+#
+# NOTE: mediapipe 0.10.x requires Python 3.11.  Do NOT use 3.12+.
+# Install:
+#   python3.11 -m venv .venv
+#   .venv\Scripts\activate          # PowerShell: .\.venv\Scripts\Activate.ps1
+#   pip install -r requirements.txt
+#   pip install -e .
+
+# ── CLI / web ──────────────────────────────────────────────────────────────
+typer==0.20.0
+pydantic==2.12.3
+fastapi==0.119.1
+uvicorn==0.38.0
+websockets==15.0.1
+rich==14.2.0
+
+# ── Data / ML ──────────────────────────────────────────────────────────────
+numpy==2.3.4
+pandas==2.3.3
+pyarrow==21.0.0
+scikit-learn==1.7.2
+scipy==1.16.2
+
+# ── Computer vision / eye tracking ────────────────────────────────────────
+# opencv-contrib-python is a superset of opencv-python — install only this one
+opencv-contrib-python==4.11.0.86
+mediapipe==0.10.14          # mpiris + optimeyes; requires Python 3.11
+
+# ── IPC / stimulus ────────────────────────────────────────────────────────
+pyzmq==27.1.0
+pygame==2.6.1
+msgpack==1.1.2
+sounddevice==0.5.3
+
+# ── Visualisation ─────────────────────────────────────────────────────────
+matplotlib==3.10.7
