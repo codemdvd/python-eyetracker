@@ -141,6 +141,8 @@ class StimEngine:
                 if cap.isOpened():
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cfg.width)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cfg.height)
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # DSHOW: 0.75 = auto
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)     # MSMF: 3 = auto
             except Exception:
                 cap = None
 
