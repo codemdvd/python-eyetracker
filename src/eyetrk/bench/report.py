@@ -13,6 +13,7 @@ from .tasks import TASK_REGISTRY
 
 @dataclass
 class TaskMetrics:
+    """Computed accuracy and reliability metrics for one tracker on one benchmark task in one session."""
     session_id: str
     tracker_id: str
     task_name: str
@@ -27,6 +28,7 @@ class TaskMetrics:
 
 
 def compute_session_metrics(session_dir: Path) -> List[TaskMetrics]:
+    """Load session.json and all samples_*.csv files from a session directory and return TaskMetrics for every tracker × task combination."""
     session_dir = Path(session_dir)
     session_id = session_dir.name
     meta_path = session_dir / "session.json"
@@ -76,6 +78,7 @@ def _metrics_for_tracker(
     ppi: float = 96.0,
     distance_cm: float = 60.0,
 ) -> List[TaskMetrics]:
+    """Group a tracker's sample DataFrame by task_name and compute MAE, RMSE, precision, and drop-rate for each group."""
     if df.empty or "task_name" not in df.columns:
         return []
 
@@ -142,6 +145,7 @@ def _metrics_for_tracker(
 
 
 def _predict_pixels(df: pd.DataFrame, screen_w: int, screen_h: int):
+    """Return (x_px, y_px) Series from the DataFrame, falling back from pixel to normalised columns and filling gaps."""
     x_series = df["x_px"].copy() if "x_px" in df.columns else None
     y_series = df["y_px"].copy() if "y_px" in df.columns else None
 

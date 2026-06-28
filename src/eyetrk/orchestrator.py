@@ -18,6 +18,8 @@ from .bench.postprocess import BenchmarkAnchorRecalibrator, BenchmarkBiasCorrect
 
 
 class Orchestrator:
+    """Central coordinator: drives the stimulus engine, routes events to tracker adapters, buffers samples, and triggers model fitting."""
+
     def __init__(
         self,
         adapters: Dict[str, Tracker],
@@ -47,6 +49,7 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
 
     def _on_sample(self, sample: Sample):
+        """Callback for every incoming gaze sample: stamps task/stim context, applies postprocessors, buffers, and logs."""
         with self._state_lock:
             if not sample.session_id:
                 sample.session_id = self.session_id
@@ -94,10 +97,12 @@ class Orchestrator:
         self.logger.write_sample(sample)
 
     def start_streams(self):
+        """Start all adapter data streams, registering _on_sample as the shared callback."""
         for a in self.adapters.values():
             a.start_stream(self._on_sample, self.session_id)
 
     def stop_streams(self):
+        """Stop all adapter streams, silencing errors so a failed stop never aborts teardown."""
         for a in self.adapters.values():
             try:
                 a.stop()
@@ -105,10 +110,12 @@ class Orchestrator:
                 pass
 
     def _broadcast(self, event: str, payload: dict | None = None):
+        """Send an event to every registered adapter's on_event handler."""
         for a in self.adapters.values():
             a.on_event(event, payload or {})
 
     def _record_event(self, event: str, payload: dict | None = None) -> None:
+        """Write one event to timeline.jsonl, injecting t_ms and current task_name if absent."""
         data = dict(payload or {})
         data.setdefault("t_ms", int(time.time() * 1000))
         if "task_name" not in data:
@@ -122,6 +129,7 @@ class Orchestrator:
             pass
 
     def _reset_web_ready_counts(self) -> None:
+        """Zero the per-tracker sample counters used to detect when browser trackers have started streaming."""
         with self._state_lock:
             for name in ("webgazer", "gazerecorder"):
                 self._web_ready_counts[name] = 0
@@ -479,6 +487,7 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
 
     def _handle_task_event(self, event, eng, dims: tuple[int, int] | None = None, web_only: bool = False):
+        """Dispatch a single Task timeline event to the appropriate stim or wait helper."""
         etype = event.type
         payload = event.payload or {}
         if etype == "wait_ms":
@@ -491,12 +500,14 @@ class Orchestrator:
             self._task_stim_off(payload, eng, web_only=web_only)
 
     def _wait_with_engine(self, eng, wait_ms: int):
+        """Busy-wait for wait_ms milliseconds while pumping the stimulus engine's event loop."""
         wait_ms = max(0, int(wait_ms))
         end_ts = int(time.time() * 1000) + wait_ms
         while int(time.time() * 1000) < end_ts:
             eng.tick()
 
     def _task_stim_on(self, payload: dict, eng, dims: tuple[int, int] | None = None, web_only: bool = False):
+        """Show a stimulus at normalised coordinates, record its t_on window, and broadcast stim/stim_on events."""
         stim_id = payload.get("id")
         x = payload.get("x_norm")
         y = payload.get("y_norm")
@@ -551,6 +562,7 @@ class Orchestrator:
         )
 
     def _task_stim_move(self, payload: dict, eng, dims: tuple[int, int] | None = None, web_only: bool = False):
+        """Move an already-visible stimulus to a new normalised position and broadcast stim/stim_move events."""
         x = payload.get("x_norm")
         y = payload.get("y_norm")
         if x is None or y is None:
@@ -606,6 +618,7 @@ class Orchestrator:
         )
 
     def _task_stim_off(self, payload: dict, eng, web_only: bool = False):
+        """Hide the active stimulus, close its t_on/t_off window, and broadcast stim_off events."""
         with self._state_lock:
             current_stim_id = self._active_stim_id
         stim_id = payload.get("id") or current_stim_id
@@ -755,6 +768,7 @@ class Orchestrator:
         return filtered or samples
 
     def _screen_dims(self) -> tuple[int, int]:
+        """Return current screen pixel dimensions: runtime > session_meta > fallback 1280×720."""
         with self._state_lock:
             runtime_dims = self._runtime_dims
         if runtime_dims:
@@ -764,6 +778,7 @@ class Orchestrator:
         return 1280, 720
 
     def _set_active_target_norm(self, x_norm: float | None, y_norm: float | None, dims: tuple[int, int] | None = None):
+        """Convert normalised coordinates to pixels and store as the current target for incoming samples."""
         if x_norm is None or y_norm is None:
             with self._state_lock:
                 self._active_target_px = None
@@ -773,10 +788,12 @@ class Orchestrator:
             self._active_target_px = (x_norm * w, y_norm * h)
 
     def _clear_active_target(self):
+        """Clear the active target so samples arriving between stims get no target annotation."""
         with self._state_lock:
             self._active_target_px = None
 
     def _get_stim_samples(self, tracker_id: str, stim_id: str) -> List[Sample]:
+        """Return a snapshot of all samples buffered for a given tracker × stim_id pair."""
         with self._state_lock:
             return list(self._buffers[tracker_id][stim_id])
 

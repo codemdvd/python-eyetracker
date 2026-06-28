@@ -8,6 +8,8 @@ from ..core.types import SAMPLE_CSV_FIELDS, Sample, sample_to_csv_row
 
 
 class RunLogger:
+    """Writes all session data to disk: session.json metadata, per-tracker CSV gaze samples, and a JSONL event timeline."""
+
     def __init__(self, base: str = "runs"):
         self.base = Path(base)
         self.base.mkdir(parents=True, exist_ok=True)
@@ -18,6 +20,7 @@ class RunLogger:
         self._timeline_handle: object | None = None
 
     def start_session(self, meta: SessionMeta):
+        """Open a new session directory under base/, write session.json, and close any previously open session."""
         self.close()
         self.session_dir = self.base / meta.session_id
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -28,6 +31,7 @@ class RunLogger:
         )
 
     def write_sample(self, sample: Sample):
+        """Append one gaze sample to the per-tracker CSV file, creating the file and writing a header row on first call."""
         if self.session_dir is None:
             raise RuntimeError("Session not started. Call start_session(meta) first.")
         row = sample_to_csv_row(sample)
@@ -50,6 +54,7 @@ class RunLogger:
             handle.flush()
 
     def write_event(self, event_type: str, payload: dict) -> None:
+        """Append one JSON line to timeline.jsonl with {event: event_type, ...payload} for stimulus and system events."""
         if self.session_dir is None:
             raise RuntimeError("Session not started. Call start_session(meta) first.")
         record = {"event": str(event_type), **dict(payload)}
@@ -64,6 +69,7 @@ class RunLogger:
             handle.flush()
 
     def close(self) -> None:
+        """Flush and close all open CSV and JSONL file handles; resets internal state so the logger can start a new session."""
         with self._lock:
             files = list(self._files.values())
             timeline_handle = self._timeline_handle

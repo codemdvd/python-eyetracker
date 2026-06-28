@@ -3,6 +3,7 @@ from typing import Optional
 
 
 class SessionMeta(BaseModel):
+    """Pydantic model for session.json — records hardware/environment metadata written once at session start."""
     session_id: str
     os: str
     browser: Optional[str] = None

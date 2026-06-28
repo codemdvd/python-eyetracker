@@ -89,6 +89,7 @@ class OptimeyesAdapter(Tracker):
         self._model: CalibModel | None = None
 
     def initialize(self, config: dict) -> TrackerInfo:
+        """Apply config dict, initialise MediaPipe FaceMesh with pose-aware settings, and return tracker metadata."""
         if not _MP_OK:
             raise RuntimeError("mediapipe is required for optimeyes fallback.")
         self._fps = float(config.get("fps", 30.0))
@@ -133,9 +134,11 @@ class OptimeyesAdapter(Tracker):
         return TrackerInfo(name="optimeyes", version="mediapipe", reported_fps=self._fps)
 
     def set_external_model(self, model: CalibModel) -> None:
+        """Install a fitted CalibModel so the capture loop can emit pixel-space predictions."""
         self._model = model
 
     def on_event(self, event: str, payload: dict | None = None) -> None:
+        """Freeze the auto-gain range on calibration/task start so the normalisation mapping stays stable."""
         if event in {"calibration_start", "tasks_start"}:
             self._set_auto_gain_frozen(True)
             return
@@ -144,6 +147,7 @@ class OptimeyesAdapter(Tracker):
             return
 
     def start_stream(self, callback, session_id: str | None = None):
+        """Spawn the background capture thread; callback receives each Sample as it arrives."""
         self._cb = callback
         if session_id is not None:
             self._session_id = session_id
@@ -152,6 +156,7 @@ class OptimeyesAdapter(Tracker):
         self._thread.start()
 
     def stop(self):
+        """Signal the capture thread to exit, release the camera, and destroy any preview windows."""
         self._stop.set()
         self._set_auto_gain_frozen(False)
         if self._cap:
@@ -165,6 +170,7 @@ class OptimeyesAdapter(Tracker):
         self._close_video_writer()
 
     def _loop(self):
+        """Main capture loop: opens camera/video, runs FaceMesh per frame, and calls self._cb with each Sample."""
         if self._video_path:
             self._cap = cv2.VideoCapture(self._video_path, cv2.CAP_ANY)
         elif self._camera_source == "daheng":

@@ -14,6 +14,7 @@ from ..core.types import CalibModel
 
 @dataclass
 class FitOutput:
+    """Result of fit_dataframe(): the fitted model, diagnostic stats dict, and per-stimulus error breakdown."""
     model: CalibModel
     diag: Dict[str, float | int | bool]
     per_stim: pd.DataFrame | None
@@ -27,6 +28,14 @@ def fit_dataframe(
     allow_extra_features: bool = False,
     validation_df: pd.DataFrame | None = None,
 ) -> FitOutput:
+    """Fit a polynomial gaze correction model from calibration samples.
+
+    Tries multiple input feature sets (e.g. [x_norm, y_norm], [iris_from_head_x, y, pitch])
+    and polynomial degrees (1–2), selects the best via leave-one-out CV MAE.
+    If validation_df (task samples with known targets) is provided, ranks candidates by
+    transfer accuracy instead of training accuracy.
+    Returns FitOutput with the winning CalibModel, diagnostics, and per-point error stats.
+    """
     df = df.copy()
     df = df[df["validity"] == 0]
     df = df.dropna(subset=["x_norm", "y_norm"])
@@ -202,6 +211,7 @@ def _candidate_feature_sets(
     tracker_name: str | None,
     allow_extra_features: bool,
 ) -> list[list[str]]:
+    """Return ordered list of feature column sets to try for this tracker. Tracker-specific curated sets come after the universal [x_norm, y_norm] baseline."""
     candidates: list[list[str]] = [["x_norm", "y_norm"]]
     if tracker_name == "mpiris":
         curated = [
@@ -269,6 +279,7 @@ def _fit_with_features(
     height: int,
     per_stim_median: bool,
 ) -> dict:
+    """Fit one candidate model using the given feature columns. Returns a dict with model, predictions, and per-sample errors."""
     agg = None
     if per_stim_median:
         agg = _aggregate_calibration_points(df, feature_cols, width=width, height=height)
@@ -316,6 +327,7 @@ def _fit_with_features(
 
 
 def _stim_mapping(width: int, height: int) -> Dict[str, Tuple[float, float]]:
+    """Build a dict from stim_id (e.g. 'calib_01') to target pixel coordinates for the 9-point grid."""
     pts = generate_9pt_grid().points
     m: Dict[str, Tuple[float, float]] = {}
     for p in pts:
@@ -325,10 +337,12 @@ def _stim_mapping(width: int, height: int) -> Dict[str, Tuple[float, float]]:
 
 
 def _base_stim_id(stim_id: str) -> str:
+    """Strip retry suffixes from a stim_id to get the canonical base name (e.g. 'calib_01_retry' → 'calib_01')."""
     return stim_id.replace("__", "_").replace("-", "_").split("_retry")[0]
 
 
 def _select_best_calibration_attempts(df: pd.DataFrame, *, width: int, height: int) -> pd.DataFrame:
+    """For each calibration point that has multiple attempts (original + retries), keep the attempt with the lowest spatial dispersion."""
     if "stim_id" not in df.columns or df.empty:
         return df
 
@@ -427,6 +441,7 @@ def _aggregate_calibration_points(
     width: int,
     height: int,
 ) -> pd.DataFrame:
+    """Collapse all samples per calibration point to a single row using robust median after outlier trimming."""
     rows: list[dict[str, float | int | str]] = []
     required = feature_cols + ["target_x", "target_y"]
     for stim_key, grp in df.groupby("stim_key", sort=True):
@@ -454,6 +469,7 @@ def _aggregate_calibration_points(
 
 
 def _robust_feature_inliers(df: pd.DataFrame) -> np.ndarray:
+    """Return boolean mask keeping the 65–85% of rows closest to the feature-space median (discards gaze outliers)."""
     values = df.to_numpy(dtype=float)
     n_rows = len(values)
     if n_rows <= 6:
@@ -470,6 +486,7 @@ def _robust_feature_inliers(df: pd.DataFrame) -> np.ndarray:
 
 
 def _point_dispersion_px(df: pd.DataFrame, *, width: int, height: int) -> float:
+    """RMS distance of each sample from the median gaze position for one calibration point, in pixels."""
     coords = df[["x_norm", "y_norm"]].dropna()
     if len(coords) < 2:
         return 0.0
@@ -486,6 +503,7 @@ def _score_validation_tasks(
     model: CalibModel,
     feature_cols: list[str],
 ) -> dict[str, float | int] | None:
+    """Apply model to task-phase samples and return transfer MAE/RMSE/bias. Returns None if no task data available."""
     if df is None or df.empty:
         return None
     if "task_name" not in df.columns:
@@ -526,6 +544,7 @@ def _predict_pixels(
     model: CalibModel,
     feature_cols: list[str],
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Apply a fitted CalibModel to a DataFrame and return (pred_x_px, pred_y_px) arrays."""
     params = model.params
     powers = np.asarray(params["powers"], dtype=int)
     X = df[feature_cols].to_numpy(dtype=float)

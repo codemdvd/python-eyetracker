@@ -13,6 +13,7 @@ from ..core.types import Sample
 
 @dataclass
 class TimelineState:
+    """Mutable cursor tracking which task and stimulus are currently active while replaying a timeline."""
     task_name: str | None = None
     stim_id: str | None = None
     target_x_px: float | None = None
@@ -20,6 +21,7 @@ class TimelineState:
 
 
 def load_timeline(path: Path) -> list[dict]:
+    """Parse a timeline.jsonl file into a list of event dicts, sorted by t_ms."""
     events: list[dict] = []
     if not path.exists():
         return events
@@ -38,6 +40,7 @@ def load_timeline(path: Path) -> list[dict]:
 
 
 def load_video_meta(path: Path) -> dict:
+    """Load a JSON sidecar file (e.g. video_meta.json) as a plain dict; returns {} on missing file or parse error."""
     if not path.exists():
         return {}
     try:
@@ -47,6 +50,7 @@ def load_video_meta(path: Path) -> dict:
 
 
 def load_frame_labels(path: Path) -> dict[int, dict]:
+    """Read a frame_labels CSV and return a dict mapping frame_id → {task_name, stim_id, target_x_px, target_y_px}."""
     if not path.exists():
         return {}
     try:
@@ -74,12 +78,15 @@ def load_frame_labels(path: Path) -> dict[int, dict]:
 
 
 class SessionTimelineLabeler:
+    """Stamps each Sample with task_name, stim_id, and target coordinates by replaying the session's timeline.jsonl in timestamp order."""
+
     def __init__(self, events: Iterable[dict]):
         self._events = list(events)
         self._index = 0
         self._state = TimelineState()
 
     def apply(self, sample: Sample) -> Sample:
+        """Advance the timeline cursor to the sample's timestamp and copy the current state onto the sample."""
         ts = int(getattr(sample, "timestamp_ms", 0) or 0)
         while self._index < len(self._events):
             event = self._events[self._index]
@@ -100,6 +107,7 @@ class SessionTimelineLabeler:
         return sample
 
     def _consume_event(self, event: dict) -> None:
+        """Update TimelineState fields from a single timeline event dict."""
         kind = str(event.get("event", ""))
         if kind in {"task_start"}:
             self._state.task_name = _as_text(event.get("task"))
@@ -134,10 +142,13 @@ class SessionTimelineLabeler:
 
 
 class FrameLabeler:
+    """Stamps each Sample with task/stim labels looked up by frame_id from a pre-loaded frame_labels dict."""
+
     def __init__(self, frame_labels: dict[int, dict]):
         self._frame_labels = dict(frame_labels)
 
     def apply(self, sample: Sample) -> Sample:
+        """Copy task/stim labels from the frame_labels table onto the sample using its frame_id as the key."""
         frame_id = getattr(sample, "frame_id", None)
         if frame_id is None:
             return sample

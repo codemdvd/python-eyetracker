@@ -107,7 +107,7 @@ class MpirisAdapter(Tracker):
     # ---- public API -----------------------------------------------------
 
     def initialize(self, cfg: dict) -> TrackerInfo:
-        """cfg: {fps?: float, camera_index?: int, width?: int, height?: int}"""
+        """Apply config dict, initialise MediaPipe FaceMesh, and return tracker metadata."""
         self._target_fps = float(cfg.get("fps", self._target_fps))
         self._cam_index = int(cfg.get("camera_index", self._cam_index))
         self._camera_source = str(cfg.get("camera_source", self._camera_source))
@@ -157,9 +157,11 @@ class MpirisAdapter(Tracker):
         return TrackerInfo(name=self._tracker_id, version=version, reported_fps=self._target_fps)
 
     def set_external_model(self, model: CalibModel) -> None:
+        """Install a fitted CalibModel so the capture loop can convert raw iris coords to pixel predictions."""
         self._model = model
 
     def start_stream(self, callback, session_id: str | None = None) -> None:
+        """Spawn the background capture thread; no-op if one is already running."""
         if session_id is not None:
             self._session_id = session_id
         if self._thread and self._thread.is_alive():
@@ -171,6 +173,7 @@ class MpirisAdapter(Tracker):
         self._thread.start()
 
     def stop(self) -> None:
+        """Signal the capture thread to exit and join it; releases the camera and video writer."""
         self._running = False
         self._set_auto_gain_frozen(False)
         if self._thread and self._thread.is_alive():
@@ -179,6 +182,7 @@ class MpirisAdapter(Tracker):
         self._close_video_writer()
 
     def on_event(self, event: str, payload: dict | None = None) -> None:
+        """Freeze auto-gain range on calibration/task start so lighting changes don't shift the mapping."""
         if event in {"calibration_start", "tasks_start"}:
             self._set_auto_gain_frozen(True)
             return
@@ -190,6 +194,7 @@ class MpirisAdapter(Tracker):
     # ---- internal -------------------------------------------------------
 
     def _run_loop(self, callback) -> None:
+        """Main capture loop: opens camera/video, runs FaceMesh per frame, and calls callback with each Sample."""
         cap = None
         if self._video_path:
             cap = cv2.VideoCapture(self._video_path, cv2.CAP_ANY)

@@ -20,6 +20,7 @@ SEND_QUEUE_MAXSIZE = 1000
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Suppress spurious ConnectionResetError/BrokenPipeError from the Windows asyncio event loop on shutdown."""
     if sys.platform == "win32":
         loop = asyncio.get_event_loop()
 
@@ -37,6 +38,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 class WGSample(BaseModel):
+    """JSON payload received from the browser via WebSocket for each gaze sample."""
     tracker_id: str
     session_id: str
     timestamp_ms: int
@@ -67,6 +69,7 @@ class WGSample(BaseModel):
 
 @app.get("/health")
 def health():
+    """Liveness probe used by the CLI to verify the bridge server started successfully."""
     return {"ok": True}
 
 
@@ -74,6 +77,7 @@ _PASSTHROUGH_EVENTS = {"internal_calibration", "sdk_calibrated", "sdk_load_faile
 
 
 def _sanitize_browser_sample(sample: WGSample) -> WGSample | None:
+    """Validate and clamp incoming browser gaze coordinates; returns None to drop obviously corrupted samples."""
     if sample.x_norm is None or sample.y_norm is None:
         if sample.event in _PASSTHROUGH_EVENTS:
             return sample
@@ -105,6 +109,7 @@ def _sanitize_browser_sample(sample: WGSample) -> WGSample | None:
 
 
 def _get_send_queue(tracker_id: str) -> "queue.Queue[dict]":
+    """Return (creating if needed) the outgoing message queue for a given tracker's WebSocket connection."""
     q = send_queues.get(tracker_id)
     if q is None:
         q = queue.Queue(maxsize=SEND_QUEUE_MAXSIZE)
@@ -114,6 +119,7 @@ def _get_send_queue(tracker_id: str) -> "queue.Queue[dict]":
 
 
 def push_event(tracker_id: str, payload: dict) -> None:
+    """Enqueue a Python→browser message; drops the oldest entry if the queue is full to preserve recent stim events."""
     q = _get_send_queue(tracker_id)
     try:
         q.put_nowait(payload)
@@ -136,6 +142,7 @@ def push_event(tracker_id: str, payload: dict) -> None:
 
 @app.websocket("/ws/{tracker_id}")
 async def ws_endpoint(ws: WebSocket, tracker_id: str):
+    """WebSocket endpoint for one tracker: reads browser gaze JSON, routes to the adapter, and forwards Python→browser events."""
     print(f"[web-bridge] WS connect: {tracker_id}", file=sys.stderr, flush=True)
     recv_counts[tracker_id] = 0
     _get_send_queue(tracker_id)

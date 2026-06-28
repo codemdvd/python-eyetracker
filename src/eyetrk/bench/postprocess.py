@@ -46,6 +46,7 @@ class BenchmarkBiasCorrector:
         self._states: dict[str, _TaskBiasState] = {}
 
     def apply(self, sample: Sample) -> Sample:
+        """Subtract the current running bias from the sample's x_px/y_px in-place and update bias from the new residual."""
         task_name = getattr(sample, "task_name", None)
         if task_name not in {"fixation-grid", "step-saccades", "smooth-pursuit"}:
             return sample
@@ -118,6 +119,7 @@ class BenchmarkAnchorRecalibrator:
         self._segment_points: list[tuple[int, float, float, float, float]] = []
 
     def apply(self, sample: Sample) -> Sample:
+        """Apply the fitted polynomial warp (if available) to x_px/y_px and collect fixation anchors for future fitting."""
         task_name = getattr(sample, "task_name", None)
         stim_id = getattr(sample, "stim_id", None)
         key = (task_name, stim_id)
@@ -149,6 +151,7 @@ class BenchmarkAnchorRecalibrator:
         return sample
 
     def _finalize_segment(self) -> None:
+        """Compute the median stable gaze position for the completed segment and add it as a calibration anchor."""
         if not self._segment_points:
             return
         task_name, _stim_id = self._segment_key if self._segment_key is not None else (None, None)
@@ -167,6 +170,7 @@ class BenchmarkAnchorRecalibrator:
             self._fit_model()
 
     def _fit_model(self) -> None:
+        """Fit a degree-2 polynomial Ridge regression from raw gaze coordinates to target coordinates using all collected anchors."""
         X = np.asarray([[row[0], row[1]] for row in self._anchor_points], dtype=float)
         Y = np.asarray([[row[2], row[3]] for row in self._anchor_points], dtype=float)
         poly = PolynomialFeatures(2, include_bias=True)

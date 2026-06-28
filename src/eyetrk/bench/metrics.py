@@ -4,19 +4,23 @@ import numpy as np
 
 
 def mean_absolute_error(pred: np.ndarray, truth: np.ndarray) -> float:
+    """Mean Euclidean distance between predicted and ground-truth gaze points, in pixels."""
     return float(np.mean(np.linalg.norm(pred - truth, axis=1)))
 
 
 def root_mean_squared_error(pred: np.ndarray, truth: np.ndarray) -> float:
+    """Root mean squared Euclidean error between predicted and ground-truth gaze, in pixels."""
     return float(np.sqrt(np.mean(np.sum((pred - truth) ** 2, axis=1))))
 
 
 def precision_rms_sd(points: np.ndarray) -> float:
+    """RMS spatial dispersion of a set of gaze points around their centroid — measures repeatability independent of accuracy."""
     c = np.mean(points, axis=0)
     return float(np.sqrt(np.mean(np.sum((points - c) ** 2, axis=1))))
 
 
 def drop_rate(valid_mask: np.ndarray) -> float:
+    """Fraction of frames where the tracker produced no valid gaze sample (validity != 0)."""
     return float(1.0 - np.mean(valid_mask))
 
 

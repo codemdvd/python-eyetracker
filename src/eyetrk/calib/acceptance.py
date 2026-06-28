@@ -14,6 +14,14 @@ def acceptance(
     target_xy_px: Optional[tuple[float, float]] = None,
     max_offset_px: float = 80.0,    # target proximity threshold
 ) -> bool:
+    """Return True if calibration samples for one point are good enough to keep.
+
+    Checks three criteria simultaneously:
+    - valid_ms  >= min_valid_ms  : enough time spent fixating (filters blinks/distractions)
+    - rms_sd    <= max_disp_px   : gaze cluster is spatially tight (filters unstable fixations)
+    - offset    <= max_offset_px : cluster centre is close enough to the target dot
+    If any criterion fails the point is rejected and the orchestrator requests a retry.
+    """
     samples = list(samples)
     if not samples:
         return False

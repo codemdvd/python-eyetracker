@@ -25,20 +25,24 @@ class WebGazerAdapter(Tracker):
         self.uses_internal_calibration: bool = True
 
     def initialize(self, config: dict) -> TrackerInfo:
+        """Store output resolution from config and return tracker metadata."""
         self._out_w = int(config.get("out_width", self._out_w))
         self._out_h = int(config.get("out_height", self._out_h))
         version = config.get("version", "unknown")
         return TrackerInfo(name="webgazer", version=version)
 
     def set_external_model(self, model: CalibModel) -> None:
+        """Store a post-calibration correction model for apply on top of WebGazer's own JS predictions."""
         self._model = model
 
     def start_stream(self, callback: Callable[[Sample], None], session_id: str | None = None) -> None:
+        """Register the sample callback; WebGazer samples arrive via emit() from the WebSocket bridge."""
         self._cb = callback
         if session_id:
             self._session_id = session_id
 
     def stop(self) -> None:
+        """Clear the callback and session id; does not close the WebSocket (managed by the bridge server)."""
         self._cb = None
         self._session_id = None
 

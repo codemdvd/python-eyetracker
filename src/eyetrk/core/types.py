@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class Sample(BaseModel):
+    """One gaze frame from any tracker. All spatial fields except session/tracker identity are optional so adapters fill only what they can measure."""
     session_id: str
     tracker_id: str
     timestamp_ms: int
@@ -63,6 +64,7 @@ SAMPLE_CSV_FIELDS = tuple(Sample.model_fields.keys())
 
 
 def sample_to_csv_row(sample: "Sample") -> dict[str, object]:
+    """Flatten a Sample to a plain dict ordered by SAMPLE_CSV_FIELDS for CSV writing."""
     data = sample.model_dump(mode="python")
     return {field: data.get(field) for field in SAMPLE_CSV_FIELDS}
 
@@ -77,6 +79,7 @@ def sanitize_predicted_point(
     y_norm: float | None = None,
     margin_ratio: float = 0.2,
 ) -> tuple[float | None, float | None]:
+    """Clamp predicted gaze to screen bounds. Returns None/fallback for NaN, inf, or wildly out-of-bounds values."""
     fallback_x = float(x_norm * screen_w) if x_norm is not None else None
     fallback_y = float(y_norm * screen_h) if y_norm is not None else None
 
@@ -103,12 +106,14 @@ def sanitize_predicted_point(
 
 
 class CalibModel(BaseModel):
+    """Serialisable calibration model saved to models/<tracker>.json. params contains the polynomial coefficients."""
     model_type: Literal["poly2","homography","native"]
     params: dict
     fit_error_px: float | None = None
 
 
 class TrackerInfo(BaseModel):
+    """Static metadata returned by Tracker.initialize(); describes tracker identity and capabilities."""
     name: str
     version: str
     reported_fps: float | None = None

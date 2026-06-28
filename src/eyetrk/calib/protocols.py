@@ -7,6 +7,7 @@ from typing import List
 
 @dataclass
 class Point:
+    """One calibration target. x_norm/y_norm are in [0,1] screen-relative coordinates."""
     id: str
     x_norm: float
     y_norm: float
@@ -16,12 +17,12 @@ class Point:
 
 @dataclass
 class Sequence:
+    """Ordered list of calibration Points shown to the user one by one."""
     points: List[Point]
 
 
-
-
 def generate_9pt_grid(dwell_ms: int = 1000, gap_ms: int = 300) -> Sequence:
+    """Standard 9-point calibration grid: centre first, then 4 corners, then 4 edge midpoints."""
     coords = [
         (0.5, 0.5),   # center
         (0.1, 0.1),   # tl

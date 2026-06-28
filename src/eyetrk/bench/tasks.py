@@ -7,12 +7,14 @@ from typing import Callable, Dict, List
 
 @dataclass
 class Event:
+    """One step in a task timeline: type is 'stim_on'/'stim_off'/'stim_move'/'wait_ms', payload carries coordinates or duration."""
     type: str
     payload: dict
 
 
 @dataclass
 class Task:
+    """A named benchmark task with an ordered list of stimulus events to play back."""
     name: str
     timeline: List[Event]
 
@@ -25,6 +27,7 @@ GRID_POINTS = [
 
 
 def fixation_grid(dwell_ms: int = 800, gap_ms: int = 200, repeats: int = 2) -> Task:
+    """5×5 grid of 25 stationary fixation targets. Each point shown for dwell_ms, repeated `repeats` times."""
     events: List[Event] = []
     rep = max(1, int(repeats))
     for r in range(rep):
@@ -45,6 +48,7 @@ def step_saccades(
     right_x: float = 0.8,
     y: float = 0.5,
 ) -> Task:
+    """Horizontal left–right alternating targets at fixed y. Tests saccadic eye movement response speed and accuracy."""
     events: List[Event] = []
     stim_idx = 1
     for cycle in range(cycles):
@@ -67,6 +71,7 @@ def smooth_pursuit(
     center_y: float = 0.5,
     laps: int = 2,
 ) -> Task:
+    """Circular moving target. Tests smooth pursuit tracking ability — how well the tracker follows continuous motion."""
     events: List[Event] = []
     stim_id = "pursuit_circle"
     step_ms = max(10, int(1000 / max(1, fps)))
@@ -102,6 +107,7 @@ TASK_REGISTRY: Dict[str, Callable[[], Task]] = {
 
 
 def resolve_tasks(names: List[str]) -> List[Task]:
+    """Look up task names in TASK_REGISTRY and return instantiated Task objects. Raises ValueError for unknown names."""
     tasks: List[Task] = []
     for name in names:
         factory = TASK_REGISTRY.get(name)

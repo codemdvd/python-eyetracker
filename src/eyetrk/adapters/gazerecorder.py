@@ -24,6 +24,7 @@ class GazerecorderAdapter(Tracker):
         self._sdk_calibrated: bool = False
 
     def initialize(self, config: dict) -> TrackerInfo:
+        """Store output resolution and calibration mode from config and return tracker metadata."""
         self._out_w = int(config.get("out_width", self._out_w))
         self._out_h = int(config.get("out_height", self._out_h))
         self.uses_internal_calibration = bool(config.get("use_internal_calibration", False))
@@ -31,15 +32,17 @@ class GazerecorderAdapter(Tracker):
         return TrackerInfo(name="gazerecorder", version=version)
 
     def set_external_model(self, model: CalibModel) -> None:
-        # Apply correction model on top of GR cloud output regardless of wizard state.
+        """Store a correction model applied on top of GR's cloud-calibrated output."""
         self._model = model
 
     def start_stream(self, callback: Callable[[Sample], None], session_id: str | None = None) -> None:
+        """Register the sample callback; GR samples arrive via emit() from the WebSocket bridge."""
         self._cb = callback
         if session_id:
             self._session_id = session_id
 
     def stop(self) -> None:
+        """Clear the callback, session id, and SDK calibration flag; WebSocket is managed by the bridge server."""
         self._cb = None
         self._session_id = None
         self._sdk_calibrated = False
