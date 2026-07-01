@@ -203,10 +203,29 @@ class OptimeyesAdapter(Tracker):
             print(f"[OptimeyesAdapter] Webcam opened ({w:.0f}x{h:.0f})")
         source_start_ms = self._video_start_timestamp_ms if self._video_path else int(time.time() * 1000)
 
+        if not self._video_path and self._camera_source not in ("daheng",):
+            try:
+                _ok, _f = self._cap.read()
+                if not _ok or _f is None:
+                    raise cv2.error("no frame")
+            except cv2.error:
+                print("[optimeyes] MJPG format failed — switching to 640x480 default codec")
+                self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUY2"))
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                w = self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                h = self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                fps = self._cap.get(cv2.CAP_PROP_FPS)
+                print(f"[optimeyes] Fallback: {w:.0f}x{h:.0f} @ {fps:.0f}fps")
+
         frame_id = 0
         misses = 0
         while not self._stop.is_set():
-            ret, frame = self._cap.read()
+            try:
+                ret, frame = self._cap.read()
+            except cv2.error:
+                time.sleep(0.01)
+                continue
             if not ret:
                 if self._video_path:
                     break
@@ -321,6 +340,8 @@ class OptimeyesAdapter(Tracker):
     def _infer_norm(self, frame):
         if self._face_mesh is None:
             return None, None, None
+        h_f, w_f = frame.shape[:2]
+        frame = frame[:h_f & ~1, :w_f & ~1]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self._face_mesh.process(rgb)
         if not res.multi_face_landmarks:

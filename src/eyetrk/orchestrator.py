@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 import threading
-import numpy as np
 from typing import Dict, List
 from collections import defaultdict
 
@@ -141,7 +140,6 @@ class Orchestrator:
         dwell_ms=1000,
         gap_ms=300,
         fullscreen=False,
-        head_pursuit: bool = True,
         camera_index: int | None = 0,
         mirror_preview: bool = True,
         cam_unmirror: bool = True,
@@ -340,9 +338,6 @@ class Orchestrator:
                 gap_until = int(time.time() * 1000) + pt.gap_ms
                 while int(time.time() * 1000) < gap_until:
                     eng.tick()
-
-            if head_pursuit and not _web_only:
-                self._run_head_pursuit(eng, dims=(w, h))
 
             done_payload = {"t_ms": int(time.time() * 1000)}
             self._broadcast("calibration_done", done_payload)
@@ -635,65 +630,6 @@ class Orchestrator:
             self._active_target_px = None
 
     # ------------------------------------------------------------------ #
-
-    def _run_head_pursuit(self, eng, dims: tuple[int, int]):
-        """Radial pursuit: slower, smoother motion from center outwards."""
-        eng.show_message(
-            "Head movement: follow the dot with your eyes and turn your head.",
-            "Starts in ~6 seconds...",
-            duration_ms=6000,
-        )
-        cx, cy = 0.5, 0.5
-        dirs = [
-            (1, 0), (-1, 0), (0, 1), (0, -1),
-            (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7), (-0.7, -0.7),
-        ]
-        step_ms = 50  # slower for smoother head pursuit
-        segments = []
-        for dx, dy in dirs:
-            forward = np.linspace(0.12, 0.42, 96)
-            backward = np.linspace(0.42, 0.14, 72)
-            for alpha in forward:
-                segments.append((cx + dx * alpha, cy + dy * alpha))
-            for alpha in backward:
-                segments.append((cx + dx * alpha, cy + dy * alpha))
-            # return to center smoothly
-            for alpha in np.linspace(0.14, 0.0, 6):
-                segments.append((cx + dx * alpha, cy + dy * alpha))
-
-        for idx, (x, y) in enumerate(segments):
-            x = float(max(0.05, min(0.95, x)))
-            y = float(max(0.05, min(0.95, y)))
-            stim_id = f"pursuit_{idx:03d}"
-            with self._state_lock:
-                self._active_stim_id = stim_id
-                for tr in self.adapters:
-                    self._buffers[tr][stim_id] = []
-            eng.show_point(x, y)
-            self._set_active_target_norm(x, y, dims=dims)
-            tx_px = x * dims[0]
-            ty_px = y * dims[1]
-            self._broadcast(
-                "stim",
-                {
-                    "stim_id": stim_id,
-                    "x_norm": x,
-                    "y_norm": y,
-                    "target_x_px": tx_px,
-                    "target_y_px": ty_px,
-                    "t": int(time.time() * 1000),
-                },
-            )
-            self._broadcast(
-                "calib_head_move",
-                {"id": stim_id, "x_norm": x, "y_norm": y, "t": int(time.time() * 1000)},
-            )
-            eng.tick(sleep_ms=step_ms)
-
-        eng.hide()
-        with self._state_lock:
-            self._active_target_px = None
-            self._active_stim_id = None
 
     # ------------------------------------------------------------------ #
 

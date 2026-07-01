@@ -179,6 +179,7 @@ def calibrate(
     auto_start_ms: int | None = typer.Option(None, help="Auto-start after N ms (skip Space/Enter)"),
     record_video: bool = typer.Option(False, help="Record source camera video for native trackers"),
     camera_source: str = typer.Option("webcam", help="Camera source for native trackers: 'webcam' or 'daheng'"),
+    camera_index: int = typer.Option(1, help="Camera device index (0, 1, 2, …) for webcam source"),
     camera_backend: str = typer.Option(
         "auto",
         "--camera-backend",
@@ -253,6 +254,7 @@ def calibrate(
     mpiris_cfg["out_height"] = height_px
     mpiris_cfg["camera_source"] = camera_source
     mpiris_cfg["camera_backend"] = camera_backend
+    mpiris_cfg["camera_index"] = camera_index
 
     opt_cfg = dict(OPTIMEYES_DEFAULT_CFG)
     opt_cfg["out_width"] = width_px
@@ -459,6 +461,7 @@ def quickstart(
     auto_start_ms: int | None = typer.Option(None, help="Auto-start after N ms (skip Space/Enter)"),
     record_video: bool = typer.Option(False, help="Record source camera video for native trackers"),
     camera_source: str = typer.Option("webcam", help="Camera source for native trackers: 'webcam' or 'daheng'"),
+    camera_index: int = typer.Option(1, help="Camera device index (0, 1, 2, …) for webcam source"),
     camera_backend: str = typer.Option(
         "auto",
         "--camera-backend",
@@ -561,6 +564,7 @@ def quickstart(
     mpiris_cfg["out_height"] = height_px
     mpiris_cfg["camera_source"] = camera_source
     mpiris_cfg["camera_backend"] = camera_backend
+    mpiris_cfg["camera_index"] = camera_index
 
     opt_cfg = dict(OPTIMEYES_DEFAULT_CFG)
     opt_cfg["out_width"] = width_px
@@ -1081,6 +1085,7 @@ def run_tasks(
     wait_ready: bool = typer.Option(False, help="Pause before showing tasks (set up web trackers first)"),
     record_video: bool = typer.Option(False, help="Record source camera video for native trackers"),
     camera_source: str = typer.Option("webcam", help="Camera source for native trackers: 'webcam' or 'daheng'"),
+    camera_index: int = typer.Option(1, help="Camera device index (0, 1, 2, …) for webcam source"),
     camera_backend: str = typer.Option("auto", "--camera-backend", help="cv2 backend for native webcam trackers: 'auto', 'dshow', 'msmf'"),
     all_trackers: bool = typer.Option(False, "--all", "-a", help="Run all 4 trackers. Implies --start-bridge --bridge-open-browser."),
 ):
@@ -1172,9 +1177,10 @@ def run_tasks(
         mpiris_cfg["out_height"] = height_px
         mpiris_cfg["camera_source"] = camera_source
         mpiris_cfg["camera_backend"] = camera_backend
+        mpiris_cfg["camera_index"] = camera_index
         if record_video:
             mpiris_cfg["record_video_path"] = str(Path("runs") / session_id / "source_camera.mp4")
-        cam_idx = mpiris_cfg.get("camera_index", 0)
+        cam_idx = mpiris_cfg.get("camera_index", 1)
         mirror_preview = False  # force non-mirrored preview for mpiris
         cam_unmirror = bool(mpiris_cfg.get("cam_unmirror", True))
         framing_scale = float(mpiris_cfg.get("framing_scale", 0.82))

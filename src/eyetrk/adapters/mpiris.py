@@ -260,11 +260,30 @@ class MpirisAdapter(Tracker):
                     pass
         source_start_ms = self._video_start_timestamp_ms if self._video_path else int(time.time() * 1000)
 
+        if not self._video_path and self._camera_source not in ("daheng",):
+            try:
+                _ok, _f = cap.read()
+                if not _ok or _f is None:
+                    raise cv2.error("no frame")
+            except cv2.error:
+                print("[mpiris] MJPG format failed — switching to 640x480 default codec")
+                cap.set(cv2.CAP_PROP_FOURCC, cast(Any, cv2).VideoWriter_fourcc(*"YUY2"))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                ret_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                ret_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                ret_fps = cap.get(cv2.CAP_PROP_FPS)
+                print(f"[mpiris] Fallback: {ret_w:.0f}x{ret_h:.0f} @ {ret_fps:.0f}fps")
+
         frame_id = 0
         misses = 0
         reopen_attempts = 0
         while self._running:
-            ok, frame = cap.read()
+            try:
+                ok, frame = cap.read()
+            except cv2.error:
+                time.sleep(0.05)
+                continue
             if not ok:
                 if self._video_path:
                     break
@@ -396,6 +415,8 @@ class MpirisAdapter(Tracker):
         if not _MP_OK or self._face_mesh is None:
             return None, None, None, None, None
 
+        h_f, w_f = bgr_frame.shape[:2]
+        bgr_frame = bgr_frame[:h_f & ~1, :w_f & ~1]
         rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
         res = self._face_mesh.process(rgb)
         if not res.multi_face_landmarks:

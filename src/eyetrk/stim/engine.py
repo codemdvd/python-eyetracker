@@ -139,24 +139,37 @@ class StimEngine:
                     cap.release()
                     cap = cv2.VideoCapture(cam_index, cv2.CAP_ANY)
                 if cap.isOpened():
-                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cfg.width)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cfg.height)
                     cap.set(cv2.CAP_PROP_FPS, 30)
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
                     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                    # Test-read without MJPG first to verify camera delivers frames
+                    try:
+                        _ok, _f = cap.read()
+                        if not _ok or _f is None:
+                            raise cv2.error("no frame")
+                    except cv2.error:
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    # Now try enabling MJPG to boost FPS; if it breaks frames, revert to 640x480
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    try:
+                        _ok, _f = cap.read()
+                        if not _ok or _f is None:
+                            raise cv2.error("no frame")
+                    except cv2.error:
+                        print("[preview] MJPG not supported — using default codec at 640x480")
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUY2"))
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     actual_fps = cap.get(cv2.CAP_PROP_FPS)
                     actual_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
                     actual_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
                     fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
                     fourcc_str = "".join(chr((fourcc_int >> (8 * i)) & 0xFF) for i in range(4))
                     print(f"[preview] Camera {cam_index}: {actual_w:.0f}x{actual_h:.0f} @ {actual_fps:.0f}fps codec={fourcc_str}")
-                    if 0 < actual_fps < 20:
-                        print("[preview] Low FPS detected — retrying at 640x480")
-                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        print(f"[preview] Fallback: {cap.get(cv2.CAP_PROP_FRAME_WIDTH):.0f}x{cap.get(cv2.CAP_PROP_FRAME_HEIGHT):.0f}")
             except Exception:
                 cap = None
 
@@ -164,10 +177,15 @@ class StimEngine:
             while waiting:
                 frame_surface = None
                 if cap and cap.isOpened():
-                    ok, frame = cap.read()
+                    try:
+                        ok, frame = cap.read()
+                    except cv2.error:
+                        ok = False
                     if ok:
                         if unmirror_cam and camera_source != "daheng":
                             frame = cv2.flip(frame, 1)
+                        h_f, w_f = frame.shape[:2]
+                        frame = frame[:h_f & ~1, :w_f & ~1]
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         if mirror_preview:
                             frame_rgb = cv2.flip(frame_rgb, 1)

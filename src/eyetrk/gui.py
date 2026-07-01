@@ -124,6 +124,7 @@ class EyetrackerGui(tk.Tk):
         self.pair_task_session_var = tk.StringVar(value="")
         self.pair_per_stim_median_var = tk.BooleanVar(value=True)
         self.camera_source_var = tk.StringVar(value="webcam")
+        self.camera_index_var = tk.StringVar(value="1")
 
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -185,13 +186,18 @@ class EyetrackerGui(tk.Tk):
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(3, weight=1)
 
-        # Row 0: Camera
+        # Row 0: Camera source + index
         ttk.Label(frame, text="Camera").grid(row=0, column=0, sticky="w", pady=2)
         cam_box = ttk.Combobox(
             frame, textvariable=self.camera_source_var,
             values=["webcam", "daheng"], state="readonly", width=10,
         )
-        cam_box.grid(row=0, column=1, columnspan=3, sticky="ew", pady=2, padx=(2, 0))
+        cam_box.grid(row=0, column=1, sticky="ew", pady=2, padx=(2, 4))
+        ttk.Label(frame, text="Index").grid(row=0, column=2, sticky="w", pady=2)
+        ttk.Spinbox(
+            frame, textvariable=self.camera_index_var,
+            from_=0, to=9, width=3,
+        ).grid(row=0, column=3, sticky="w", pady=2, padx=(2, 0))
 
         # Row 1: Session ID (spanning)
         ttk.Label(frame, text="Session ID").grid(row=1, column=0, sticky="w", pady=2)
@@ -322,6 +328,7 @@ class EyetrackerGui(tk.Tk):
             "session_id": parse_optional_text(self.session_id_var.get()),
             "record_video": True,
             "camera_source": self.camera_source_var.get(),
+            "camera_index": int(self.camera_index_var.get()),
             "auto_start_ms": None,
             "camera_backend": "auto",
             "all_trackers": False,
